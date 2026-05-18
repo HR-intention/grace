@@ -66,10 +66,10 @@ class Config:
         # AI Configuration
         self.aiConfig = AIConfig(
             api_key=os.getenv("AI_API_KEY", ""),
-            provider=os.getenv("AI_PROVIDER", "litellm"),
-            base_url=os.getenv("AI_BASE_URL", "https://grid.ai.juspay.net"),
-            model_id=os.getenv("AI_MODEL_ID", "openai/qwen3-coder-480b"),
-            vision_model_id=os.getenv("AI_VISION_MODEL_ID", "openai/glm-46-fp8"),
+            provider=os.getenv("AI_PROVIDER", "groq"),
+            base_url=os.getenv("AI_BASE_URL", "https://api.groq.com/openai/v1"),
+            model_id=os.getenv("AI_MODEL_ID", ""),
+            vision_model_id=os.getenv("AI_VISION_MODEL_ID", ""),
             project_id=os.getenv("AI_PROJECT_ID"),
             location=os.getenv("AI_LOCATION", "us-east5"),
             max_tokens=int(os.getenv("AI_MAX_TOKENS", "32768")),

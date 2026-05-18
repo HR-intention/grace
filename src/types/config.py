@@ -2,14 +2,17 @@ from typing import Optional
 from dataclasses import dataclass
 
 
+_SUPPORTED_PROVIDERS = ("groq", "litellm")
+
+
 @dataclass
 class AIConfig:
     """AI provider configuration."""
     api_key: str
-    provider: str = "litellm"
-    base_url: str = "https://grid.juspay.net"
-    model_id: str = "openai/qwen3-coder-480b"
-    vision_model_id: str = "openai/glm-46-fp8"
+    provider: str = "groq"
+    base_url: str = "https://api.groq.com/openai/v1"
+    model_id: str = ""
+    vision_model_id: str = ""
     project_id: Optional[str] = None
     max_tokens: int = 50000
     location: str = "us-east5"
@@ -18,7 +21,14 @@ class AIConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
-        if self.provider == "litellm" and not self.api_key:
+        normalized = (self.provider or "").strip().lower()
+        if normalized not in _SUPPORTED_PROVIDERS:
+            raise ValueError(
+                f"Unsupported AI_PROVIDER {self.provider!r}. "
+                f"Expected one of: {', '.join(_SUPPORTED_PROVIDERS)}."
+            )
+        self.provider = normalized
+        if not self.api_key:
             raise ValueError("API key must be specified")
         
 @dataclass
@@ -62,5 +72,5 @@ class ClaudeAgentConfig:
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         if self.enabled and not self.api_key:
-            console.print("[yellow]Claude Agent SDK: No API key configured, enhancement steps will be skipped[/yellow]")
+            print("[yellow]Claude Agent SDK: No API key configured, enhancement steps will be skipped[/yellow]")
             self.enabled = False
