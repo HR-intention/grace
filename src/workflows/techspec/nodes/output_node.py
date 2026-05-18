@@ -1,6 +1,44 @@
 from ..states.techspec_state import TechspecWorkflowState as WorkflowState
 import click
 from src.tools.filemanager.filemanager import FileManager
+from pathlib import Path as _Path
+
+LANG_NEXT_STEPS = {
+    "rust": {
+        "target_repo": "connector-service/",
+        "rulesbook_path": "grace/rulesbook/codegen-rust/.gracerules",
+    },
+    "python": {
+        "target_repo": "connector-service-python/",
+        "rulesbook_path": "grace/rulesbook/codegen-python/.gracerules",
+    },
+}
+
+
+def _print_next_step(target_lang: str, connector: str) -> None:
+    """Print a language-aware next-step hint, with a warning when the target repo is missing."""
+    config = LANG_NEXT_STEPS.get(target_lang)
+    if config is None:
+        return
+
+    grace_dir = _Path(__file__).resolve().parents[4]  # grace/ root
+    target_repo = grace_dir.parent / config["target_repo"]
+
+    if not target_repo.exists():
+        click.echo(f"\n⚠️  Target repo not found: {target_repo}")
+        click.echo(
+            f"   Tech spec is generated for --target-lang {target_lang}, but "
+            f"{config['target_repo']} is not present at the expected sibling path."
+        )
+        click.echo(f"   Either:")
+        click.echo(f"     • Set up {config['target_repo']} as a sibling directory of grace/, OR")
+        click.echo(f"     • Re-run with --target-lang <other> if you meant a different target.")
+        return
+
+    click.echo(f"\nNext step (target language: {target_lang}):")
+    click.echo(f"  Open {config['target_repo']} in your AI agent and run:")
+    click.echo(f"    integrate {connector or '<Connector>'} using {config['rulesbook_path']}")
+
 
 def output_node(state: WorkflowState) -> WorkflowState:
     click.echo(f"\nProcessing Complete!")
@@ -68,5 +106,10 @@ def output_node(state: WorkflowState) -> WorkflowState:
     if "estimated_tokens" in metadata:
         tokens = metadata["estimated_tokens"]
         click.echo(f"Token usage: ~{tokens.get('estimated_input_tokens', 0)} input + {tokens.get('max_output_tokens', 0)} output")
-    
+
+    # Language-aware next-step hint
+    target_lang = state.get("target_lang", "python")
+    connector = state.get("connector_name") or state.get("file_name") or ""
+    _print_next_step(target_lang, connector)
+
     return state
