@@ -99,6 +99,21 @@ grace techspec stripe -f /path/to/docs -m
 
 Output goes to `rulesbook/codegen-rust/references/<connector>/technical_specification.md` (or the path in `TECHSPEC_OUTPUT_DIR`).
 
+### Target language
+
+The `-l` / `--target-lang` flag (defaults to `python`) selects which language pack
+will consume the generated tech spec. Acceptable values: `rust`, `python`.
+
+```bash
+grace techspec stripe -f ./docs --target-lang rust          # codegen-rust pack
+grace techspec razorpay -f ./docs --target-lang python      # codegen-python pack (default)
+```
+
+When the corresponding target service repo (`connector-service/` for Rust,
+`connector-service-python/` for Python) is not present as a sibling of
+`grace/`, the CLI prints a loud warning rather than an orphaned next-step
+hint. See [src/workflows/techspec/nodes/output_node.py](src/workflows/techspec/nodes/output_node.py) for the lookup table.
+
 ### Generate the Rust connector
 
 After producing the tech spec, switch to the **`connector-service/` repo** and tell your AI coding agent:
@@ -173,7 +188,10 @@ Invocation pattern:
 ```
 Implement {FLOW} for all connectors in {CONNECTORS_FILE}. Read grace/workflow/1_orchestrator.md and follow it exactly.
 Branch: {BRANCH}
+LANG: <target language: rust or python>
 ```
+
+The orchestrator and every per-connector subagent (`2_connector.md`, `2.2_techspec.md`, `2.3_codegen.md`, `2.4_pr.md`) take a `{LANG}` input variable (default `python`) and thread it through to `grace techspec --target-lang {LANG}` and to the language-specific codegen rulesbook.
 
 Hard constraints baked into the prompts:
 - **STRICTLY SEQUENTIAL** — one Task call per orchestrator message. Parallel agents on the shared `{BRANCH}` corrupt git state.
@@ -191,7 +209,7 @@ If you edit `workflow/*.md`, preserve these guardrails — they exist because pa
 
 ```bash
 # CLI
-grace techspec <connector> [-f docs/ | -u urls.txt] [-o out/] [-e] [-m] [-v] [--test-only]
+grace techspec <connector> [-f docs/ | -u urls.txt] [-o out/] [-l rust|python] [-e] [-m] [-v] [--test-only]
 
 # Lint / format / type-check (config in pyproject.toml; no pre-commit hook installed)
 black src/                            # line-length 100, py39-py312

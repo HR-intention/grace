@@ -94,7 +94,7 @@ Save and close the file.
 ### From a local docs folder (PDF)
 
 ```bash
-grace techspec myconnector -f /path/to/api-docs -v
+grace techspec myconnector -f /path/to/api-docs --target-lang python -v
 ```
 
 ### From a URL
@@ -104,6 +104,8 @@ grace techspec myconnector -e
 ```
 
 Replace `myconnector` with the actual name (e.g. `stripe`, `adyen`).
+
+> Pass `--target-lang rust|python` (or `-l`) to select which language pack will consume the spec. Default: `python`. The CLI warns if the matching target service repo (`connector-service/` or `connector-service-python/`) is not a sibling of `grace/`.
 
 **Output:** `rulesbook/codegen-rust/references/specs/myconnector.md`
 

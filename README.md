@@ -22,6 +22,8 @@ grace techspec <connector-name> -f /path/to/api-docs -v
 grace techspec <connector-name> -e
 ```
 
+> Pass `--target-lang rust|python` (or `-l`) to select which language pack will consume the spec. Default: `python`. If the matching target service repo (`connector-service/` for Rust, `connector-service-python/` for Python) isn't a sibling of `grace/`, the CLI prints a warning instead of a next-step hint.
+
 Output: `rulesbook/codegen-rust/references/specs/<connector-name>.md`
 
 ### 2. Run Code Generation
@@ -72,6 +74,7 @@ For implementing a payment flow across multiple connectors in one run:
 Implement {FLOW} for all connectors in {CONNECTORS_FILE}. Read grace/workflow/1_orchestrator.md and follow it exactly.
 Integration details: {CONNECTORS_FILE}
 Branch: {BRANCH}
+LANG: <target language: rust or python>
 ```
 
 **Example:**
@@ -79,6 +82,7 @@ Branch: {BRANCH}
 Implement GooglePay for all connectors in connectors.json. Read grace/workflow/1_orchestrator.md and follow it exactly.
 Integration details: connectors.json
 Branch: feat/google_pay_impl
+LANG: python
 ```
 
 ### Workflow Architecture
