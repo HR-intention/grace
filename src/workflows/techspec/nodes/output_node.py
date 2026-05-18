@@ -1,7 +1,7 @@
 from ..states.techspec_state import TechspecWorkflowState as WorkflowState
 import click
 from src.tools.filemanager.filemanager import FileManager
-from pathlib import Path as _Path
+from pathlib import Path
 
 LANG_NEXT_STEPS = {
     "rust": {
@@ -21,7 +21,7 @@ def _print_next_step(target_lang: str, connector: str) -> None:
     if config is None:
         return
 
-    grace_dir = _Path(__file__).resolve().parents[4]  # grace/ root
+    grace_dir = Path(__file__).resolve().parents[4]  # grace/ root
     target_repo = grace_dir.parent / config["target_repo"]
 
     if not target_repo.exists():
