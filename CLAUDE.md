@@ -1,16 +1,16 @@
 # Grace — AI-Assisted PSP Connector Toolkit
 
-Grace is a Python CLI plus a markdown "rulesbook" plus a set of agent prompts that, together, let an AI coding agent generate **Rust payment service provider (PSP) connectors** for the sister repo `connector-service` (Juspay's UCS / Universal Connector Service).
+Grace is a Python CLI plus a markdown "rulesbook" plus a set of agent prompts that, together, let an AI coding agent generate **payment service provider (PSP) connectors** for Juspay's UCS (Universal Connector Service). Two target languages are supported: **Python** (Wave 1, sister repo `connector-service-python`) and **Rust** (sister repo `connector-service`).
 
 There are **three distinct things** in this repo. Do not confuse them:
 
 | Component | What it is | Lives in |
 |---|---|---|
 | **Python CLI** (`grace`) | Generates `technical_specification.md` from API docs (URLs or PDFs) via a LangGraph workflow | `src/`, `main.py`, `pyproject.toml` |
-| **Rulesbook** (`.gracerules*`) | Markdown rules and pattern templates that an external AI agent reads when implementing the Rust connector | `rulesbook/codegen-rust/` |
+| **Rulesbook** (`.gracerules*`) | Markdown rules and pattern templates that an external AI agent reads when implementing a connector (Python or Rust) | `rulesbook/codegen-python/`, `rulesbook/codegen-rust/` |
 | **Workflow agents** | Markdown prompts for multi-connector batch orchestration | `workflow/` |
 
-The Rust connector code itself is **NOT in this repo** — it's generated into `connector-service/backend/connector-integration/src/connectors/` by an AI agent that the user invokes with one of the `.gracerules*` files.
+The generated connector code itself is **NOT in this repo** — it's emitted into the matching sister repo (`connector-service-python/` for Python, `connector-service/backend/connector-integration/src/connectors/` for Rust) by an AI agent that the user invokes with one of the `.gracerules*` files.
 
 ---
 
@@ -39,6 +39,14 @@ grace/
 │   │   ├── feedback.md               # Quality-review feedback (tagged by lang)
 │   │   ├── learnings.md              # Implementation lessons (tagged by lang)
 │   │   └── tech_spec_template.md     # Tech-spec template (lang-neutral)
+│   ├── codegen-python/                # Python language pack (Wave 1)
+│   │   ├── .gracerules                # Entrypoint for new connector
+│   │   ├── .gracerules_add_flow       # Wave 2 stub
+│   │   ├── .gracerules_add_payment_method  # Wave 2 stub
+│   │   └── guides/
+│   │       ├── types/types.md
+│   │       ├── patterns/              # 10 Wave 1 patterns (7 flows + 3 PMs)
+│   │       └── quality/python_quality_checks.md
 │   └── codegen-rust/                 # Rust language pack (rulebook that AI agents read)
 │       ├── .gracerules               # NEW connector from scratch (6 core flows)
 │       ├── .gracerules_add_flow      # Add one flow to existing connector
@@ -165,11 +173,16 @@ START
 
 ---
 
-## Rulesbook: how the AI agent writes Rust
+## Rulesbook: how the AI agent writes connector code
 
-The rulesbook is **read by an external AI coding agent** (Cursor / Claude Code / Windsurf) opened on the `connector-service` repo. The Python CLI does not consume it.
+The rulesbook is **read by an external AI coding agent** (Cursor / Claude Code / Windsurf) opened on the matching sister repo (`connector-service-python/` for Python, `connector-service/` for Rust). The Python CLI does not consume it.
 
-Three entrypoints, invoked in plain English commands:
+Two language packs ship in this repo:
+
+- **`codegen-python/`** — Wave 1 ready. Ships `.gracerules` plus 10 Wave 1 patterns (7 flows: Authorize, PSync, Capture, Refund, RSync, Void, IncomingWebhook; 3 payment methods: Card, Wallet, UPI). The `_add_flow` / `_add_payment_method` triad entries exist as Wave 2 stubs.
+- **`codegen-rust/`** — Full pack. Ships all three `.gracerules*` entrypoints plus the complete pattern set listed below.
+
+Three entrypoints (Rust pack; Python pack currently exposes only the first as a working entrypoint), invoked in plain English commands:
 
 | File | Command form | Used for |
 |---|---|---|

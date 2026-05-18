@@ -26,13 +26,19 @@ grace techspec <connector-name> -e
 
 Output: per-connector tech spec inside `rulesbook/codegen-<lang>/references/` (defaults to codegen-python).
 
+> **Target-language support:** Both packs are operational. `codegen-python/` is **Wave 1** ready — ships `.gracerules` with 7 flows (Authorize, PSync, Capture, Refund, RSync, Void, IncomingWebhook) and 3 payment methods (Card, Wallet, UPI). `codegen-rust/` is the full pack with the complete flow + payment-method matrix.
+
 ### 2. Run Code Generation
 
-Go back to the connector-service root folder (not `grace/`).
+Go back to the matching sister repo root folder (`connector-service-python/` for Python, `connector-service/` for Rust) — not `grace/`.
 
-Open `connector-service/` in your AI coding agent and run:
+Open the sister repo in your AI coding agent and run one of:
 
 ```
+# Python (Wave 1)
+integrate <ConnectorName> using grace/rulesbook/codegen-python/.gracerules
+
+# Rust
 integrate <ConnectorName> using grace/rulesbook/codegen-rust/.gracerules
 ```
 
