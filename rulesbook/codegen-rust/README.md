@@ -306,22 +306,31 @@ GRACE-UCS tracks and can resume from any implementation state:
 
 ```
 guides/patterns/
-├── README.md                    # Pattern overview
-├── flow_macro_guide.md          # Macro usage reference
-├── macro_patterns_reference.md  # Complete macro documentation
-└── flows/                       # Flow-specific patterns
-    ├── README.md                # Flow patterns index
-    ├── authorize/
-    │   ├── pattern_authorize.md # Core authorize flow
-    │   ├── card.md              # Card payments
-    │   ├── wallet.md            # Digital wallets
-    │   └── ...                  # Other payment methods
-    ├── capture/
-    ├── refund/
-    ├── void/
-    ├── psync/
-    ├── rsync/
-    └── ...                      # Advanced flows
+├── README.md                          # Pattern overview
+├── flow_macro_guide.md                # Macro usage reference
+├── macro_patterns_reference.md        # Complete macro documentation
+├── pattern_authorize.md               # Core authorize flow
+├── pattern_capture.md                 # Capture flow
+├── pattern_refund.md                  # Refund flow
+├── pattern_void.md                    # Void flow
+├── pattern_psync.md                   # Payment sync
+├── pattern_rsync.md                   # Refund sync
+├── pattern_setup_mandate.md           # Setup mandate
+├── pattern_repeat_payment_flow.md     # Repeat payment
+├── pattern_IncomingWebhook_flow.md    # Incoming webhook
+├── ...                                # Other flow patterns (flat under patterns/)
+└── authorize/                         # Payment-method-specific authorize patterns
+    ├── card/pattern_authorize_card.md
+    ├── wallet/pattern_authorize_wallet.md
+    ├── bank_debit/pattern_authorize_bank_debit.md
+    ├── bank_redirect/pattern_authorize_bank_redirect.md
+    ├── bank_transfer/pattern_authorize_bank_transfer.md
+    ├── bnpl/pattern_authorize_bnpl.md
+    ├── crypto/pattern_authorize_crypto.md
+    ├── gift_card/pattern_authorize_gift_card.md
+    ├── mobile_payment/pattern_authorize_mobile_payment.md
+    ├── reward/pattern_authorize_reward.md
+    └── upi/pattern_authorize_upi.md
 ```
 
 ### Pattern Usage
@@ -380,44 +389,43 @@ External Response → Connector Transform → RouterDataV2 → gRPC Response
 ```
 grace/rulesbook/codegen-rust/
 ├── .gracerules                          # New connector integration
-├── .gracerules_flow                     # Add specific flows
-├── .gracerules_payment_method           # Add payment methods
+├── .gracerules_add_flow                 # Add specific flows
+├── .gracerules_add_payment_method       # Add payment methods
 ├── README.md                            # This file
 ├── guides/
 │   ├── workflow_selection.md            # How to choose workflow
-│   ├── feedback.md                      # Quality feedback database
-│   ├── quality/                         # Quality system docs
-│   │   ├── README.md
-│   │   ├── quality_review_template.md
-│   │   └── CONTRIBUTING_FEEDBACK.md
 │   ├── connector_integration_guide.md   # Step-by-step integration
-│   ├── patterns/                        # Flow-specific patterns
+│   ├── utility_functions_reference.md   # Utility helpers reference
+│   ├── quality/                         # Rust-specific quality checks
+│   ├── patterns/                        # Flow-specific patterns (flat layout)
 │   │   ├── README.md                    # Pattern directory index
 │   │   ├── flow_macro_guide.md          # Macro patterns
 │   │   ├── macro_patterns_reference.md  # Macro reference
-│   │   └── flows/                       # Flow patterns (new structure)
-│   │       ├── README.md
-│   │       ├── authorize/
-│   │       │   ├── pattern_authorize.md
-│   │       │   ├── card.md
-│   │       │   ├── wallet.md
-│   │       │   └── ...
-│   │       ├── capture/
-│   │       ├── refund/
-│   │       ├── void/
-│   │       └── ...
-│   ├── learnings/learnings.md           # Implementation lessons
+│   │   ├── pattern_authorize.md         # Core authorize flow
+│   │   ├── pattern_capture.md           # Capture flow
+│   │   ├── pattern_refund.md            # Refund flow
+│   │   ├── pattern_void.md              # Void flow
+│   │   ├── pattern_psync.md             # Payment sync
+│   │   ├── pattern_rsync.md             # Refund sync
+│   │   ├── ...                          # Other flow patterns
+│   │   └── authorize/                   # Payment-method-specific authorize patterns
+│   │       ├── card/pattern_authorize_card.md
+│   │       ├── wallet/pattern_authorize_wallet.md
+│   │       └── ...                      # Other PM categories
 │   └── types/types.md                   # UCS type system
 ├── connector_integration/
 │   └── template/
-│       ├── tech_spec.md                 # Tech spec template
 │       └── planner_steps.md             # Planning template
 └── references/
-    └── {connector_name}/                 # Connector-specific docs
+    └── {connector_name}/                # Connector-specific docs (gitignored)
         ├── technical_specification.md
         ├── api_docs.md
         └── webhook_spec.json
 ```
+
+Note: language-neutral docs (flows, payment methods, quality rubric,
+feedback, learnings, tech-spec template) now live in
+[`../shared/`](../shared/) rather than under this pack.
 
 ## 🎯 Key Benefits
 
