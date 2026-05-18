@@ -107,7 +107,7 @@ Replace `myconnector` with the actual name (e.g. `stripe`, `adyen`).
 
 > Pass `--target-lang rust|python` (or `-l`) to select which language pack will consume the spec. Default: `python`. The CLI warns if the matching target service repo (`connector-service/` or `connector-service-python/`) is not a sibling of `grace/`.
 
-**Output:** `rulesbook/codegen-rust/references/specs/myconnector.md`
+**Output:** per-connector tech spec inside `rulesbook/codegen-<lang>/references/` (defaults to codegen-python).
 
 ---
 

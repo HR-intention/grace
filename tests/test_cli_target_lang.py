@@ -40,3 +40,10 @@ def test_short_flag_l_works(cli_runner):
     # Sanity: short flag works the same way
     result = cli_runner.invoke(cli, ["techspec", "-l", "rust", "--help"])
     assert result.exit_code == 0
+
+
+def test_target_lang_case_insensitive(cli_runner):
+    """The Click Choice has case_sensitive=False; verify uppercase is accepted."""
+    for value in ["RUST", "Python", "PyThOn", "rust", "python"]:
+        result = cli_runner.invoke(cli, ["techspec", "--target-lang", value, "--help"])
+        assert result.exit_code == 0, f"value {value!r} should be accepted but got exit_code={result.exit_code}"

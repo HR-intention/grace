@@ -109,6 +109,11 @@ grace techspec stripe -f ./docs --target-lang rust          # codegen-rust pack
 grace techspec razorpay -f ./docs --target-lang python      # codegen-python pack (default)
 ```
 
+> **Migration note:** Plan B sets the default to `python`. Users with
+> existing scripts that omit `--target-lang` will now produce
+> Python-targeted output. Pass `--target-lang rust` explicitly to
+> preserve pre-Plan-B behavior.
+
 When the corresponding target service repo (`connector-service/` for Rust,
 `connector-service-python/` for Python) is not present as a sibling of
 `grace/`, the CLI prints a loud warning rather than an orphaned next-step

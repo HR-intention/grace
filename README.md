@@ -24,7 +24,7 @@ grace techspec <connector-name> -e
 
 > Pass `--target-lang rust|python` (or `-l`) to select which language pack will consume the spec. Default: `python`. If the matching target service repo (`connector-service/` for Rust, `connector-service-python/` for Python) isn't a sibling of `grace/`, the CLI prints a warning instead of a next-step hint.
 
-Output: `rulesbook/codegen-rust/references/specs/<connector-name>.md`
+Output: per-connector tech spec inside `rulesbook/codegen-<lang>/references/` (defaults to codegen-python).
 
 ### 2. Run Code Generation
 

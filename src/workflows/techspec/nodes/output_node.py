@@ -15,24 +15,71 @@ LANG_NEXT_STEPS = {
 }
 
 
+def _find_target_repo(target_repo_name: str) -> "Path | None":
+    """Locate a target service repo by name.
+
+    Probes two canonical layouts:
+    1. Sibling: <parent>/grace + <parent>/connector-service[-python]/ (post-Plan-D world)
+    2. Parent:  connector-service/grace/  (current canonical per setup.md — grace lives inside connector-service)
+
+    Returns the first matching path that exists, or None.
+    """
+    target_name = target_repo_name.rstrip("/")
+    try:
+        grace_dir = Path(__file__).resolve().parents[4]
+    except IndexError:
+        return None  # non-editable install or unexpected layout
+
+    candidates = [
+        grace_dir.parent / target_name,           # sibling
+        grace_dir.parent,                          # grace's parent IS the target repo (e.g., connector-service/grace)
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir() and candidate.name == target_name:
+            return candidate
+    return None
+
+
 def _print_next_step(target_lang: str, connector: str) -> None:
     """Print a language-aware next-step hint, with a warning when the target repo is missing."""
     config = LANG_NEXT_STEPS.get(target_lang)
     if config is None:
         return
 
-    grace_dir = Path(__file__).resolve().parents[4]  # grace/ root
-    target_repo = grace_dir.parent / config["target_repo"]
+    target_repo = _find_target_repo(config["target_repo"])
 
-    if not target_repo.exists():
-        click.echo(f"\n⚠️  Target repo not found: {target_repo}")
+    if target_repo is None:
+        click.echo(f"\n⚠️  Target repo not found: {config['target_repo']}")
         click.echo(
             f"   Tech spec is generated for --target-lang {target_lang}, but "
-            f"{config['target_repo']} is not present at the expected sibling path."
+            f"{config['target_repo']} was not found as a sibling of grace/ or as grace/'s parent."
         )
         click.echo(f"   Either:")
         click.echo(f"     • Set up {config['target_repo']} as a sibling directory of grace/, OR")
         click.echo(f"     • Re-run with --target-lang <other> if you meant a different target.")
+        return
+
+    # Also check the rulesbook exists (I2)
+    rulesbook = Path(config["rulesbook_path"])
+    rulesbook_abs = (target_repo.parent / rulesbook) if not rulesbook.is_absolute() else rulesbook
+    # The rulesbook_path in config is repo-root-relative (e.g., 'grace/rulesbook/codegen-python/.gracerules').
+    # If grace lives at target_repo/grace (canonical), rulesbook is at target_repo/grace/rulesbook/...
+    # If grace is a sibling of target_repo, rulesbook is at target_repo.parent/grace/rulesbook/...
+    # Try both:
+    grace_dir = Path(__file__).resolve().parents[4]
+    rulesbook_candidates = [
+        grace_dir / rulesbook.relative_to("grace") if str(rulesbook).startswith("grace/") else rulesbook,
+        target_repo.parent / rulesbook,
+    ]
+    rulesbook_found = any(p.exists() for p in rulesbook_candidates)
+    if not rulesbook_found:
+        click.echo(f"\n⚠️  Rulesbook not found: {config['rulesbook_path']}")
+        click.echo(
+            f"   Target repo {target_repo} exists, but the rulesbook for --target-lang "
+            f"{target_lang} has not been authored yet."
+        )
+        if target_lang == "python":
+            click.echo(f"   Plan C (Python service shell) and Plan D (Python pattern pack) must land first.")
         return
 
     click.echo(f"\nNext step (target language: {target_lang}):")

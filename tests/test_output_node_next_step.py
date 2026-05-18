@@ -38,3 +38,21 @@ def test_print_next_step_silent_for_unknown_lang(capsys):
     _print_next_step("typescript", "stripe")
     captured = capsys.readouterr()
     assert captured.out == ""  # unknown lang → no output
+
+
+def test_output_node_invokes_print_next_step(capsys, tmp_path):
+    """End-to-end smoke: output_node() should read target_lang from state and print a hint or warning."""
+    from src.workflows.techspec.nodes.output_node import output_node
+
+    minimal_state = {
+        "target_lang": "python",
+        "connector_name": "razorpay",
+        "metadata": {"successful_crawls": 0, "failed_crawls": 0},
+        "output_dir": tmp_path,
+        "errors": [],
+        "urls_file": "dummy",  # skip the links-writing branch
+    }
+    result = output_node(minimal_state)  # noqa: F841
+    captured = capsys.readouterr()
+    # Either the success-path hint OR the warning should appear — both prove the call wired through.
+    assert "razorpay" in captured.out.lower() or "not found" in captured.out.lower() or "target_lang" in captured.out.lower() or "python" in captured.out.lower()
