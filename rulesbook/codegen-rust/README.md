@@ -507,75 +507,11 @@ add Apple Pay and Google Pay to Adyen
 
 ## 🛡️ Quality Enforcement System
 
-GRACE-UCS includes an automated **Quality Guardian Subagent** that ensures every implementation meets high quality standards.
+The scoring formula, thresholds, and cross-cutting (language-neutral)
+quality checks live in [`../shared/quality_rubric.md`](../shared/quality_rubric.md).
 
-### Quality Review Process
-
-```
-Foundation → Flow Implementation → All Flows Complete → Cargo Build ✅
-                                                              ↓
-                                                    Quality Guardian Review
-                                                              ↓
-                                        Quality Score ≥ 60? ──┬── Yes → ✅ Approved
-                                                              │
-                                                              └── No → ❌ Blocked (Fix Required)
-```
-
-### When Quality Review Runs
-
-- **New Connector**: After all 6 flows implemented
-- **Flow Addition**: After requested flow(s) implemented
-- **Payment Method Addition**: After PM implementation complete
-
-### Quality Scoring System
-
-```
-Quality Score = 100 - (Critical Issues × 20) - (Warnings × 5) - (Suggestions × 1)
-
-Thresholds:
-95-100: Excellent ✨ - Auto-approve, document success patterns
-80-94:  Good ✅ - Approve with minor notes
-60-79:  Fair ⚠️ - Approve with warnings, recommend fixes
-40-59:  Poor ❌ - Block until critical issues fixed
-0-39:   Critical 🚨 - Block immediately, requires rework
-```
-
-### What Gets Reviewed
-
-**UCS Pattern Compliance:**
-- RouterDataV2 usage (not RouterData)
-- ConnectorIntegrationV2 usage (not ConnectorIntegration)
-- domain_types imports (not hyperswitch_*)
-- Generic connector struct pattern
-- Macro-based implementation (not manual traits)
-
-**Code Quality:**
-- No code duplication
-- Consistent error handling
-- Proper status mapping
-- Specific error messages (not generic)
-- No fields hardcoded to None
-
-**Security & Performance:**
-- No exposed credentials
-- Efficient resource usage
-- Proper input validation
-
-### Feedback Database
-
-All quality issues and success patterns are captured in `../shared/feedback.md`:
-
-```
-../shared/feedback.md
-├── Quality Review Template
-├── Section 1: Critical Patterns (Must Follow)
-├── Section 2: UCS-Specific Guidelines
-├── Section 3: Flow-Specific Best Practices
-├── Section 4: Payment Method Patterns
-├── Section 5: Common Anti-Patterns
-├── Section 6: Success Patterns
-└── Section 7: Historical Feedback Archive
-```
+This pack's Rust-specific quality checks live in
+[`guides/quality/`](guides/quality/).
 
 ---
 

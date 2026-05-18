@@ -550,6 +550,8 @@ fn map_{connector_name}_status_to_attempt_status(
 # QUALITY GUARDIAN SUBAGENT SPECIFICATION
 # ============================================================================
 
+**See `../shared/quality_rubric.md` for the canonical scoring formula and cross-cutting checks.**
+
 ## QUALITY GUARDIAN SUBAGENT RESPONSIBILITIES
 
 You are the Quality Guardian Subagent. Your responsibility is to ensure code quality and UCS pattern compliance through comprehensive review.

@@ -609,6 +609,8 @@ fn map_{connector_name}_status_to_attempt_status(
 
 ## PHASE 4: QUALITY GUARDIAN SUBAGENT
 
+**See `../shared/quality_rubric.md` for the canonical scoring formula and cross-cutting checks.**
+
 Same specification as in .gracerules - see that file for complete details.
 
 Key differences for flow addition:

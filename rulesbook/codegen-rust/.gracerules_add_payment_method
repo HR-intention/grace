@@ -812,6 +812,8 @@ mod tests {
 
 ## PHASE 4: QUALITY GUARDIAN SUBAGENT
 
+**See `../shared/quality_rubric.md` for the canonical scoring formula and cross-cutting checks.**
+
 Same specification as in .gracerules - see that file for complete details.
 
 Key differences for payment method addition:
