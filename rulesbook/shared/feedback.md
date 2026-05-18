@@ -2971,3 +2971,36 @@ All entries have frequency: 1 (first occurrence from worldpay connector review)
 ---
 
 **End of Feedback Database**
+
+## [lang:python] Cashfree integration — Plan E (2026-05-19)
+
+**Outcome:** SUCCESS. Quality score: 100/100.
+
+**Highlights:**
+- Cashfree's order/payment two-step is flattenable to a single `authorize()` call by capturing `payment_session_id` from the order-create response.
+- UPI Collect uses `upi.channel="collect"` + `upi.upi_id=<vpa>`. UPI Intent uses `upi.channel="link"` and returns a deep-link URL surfaced as `RedirectionData(method="INTENT", url=upi://...)`.
+- Webhook signature scheme is HMAC-SHA256 base64 of `<x-webhook-timestamp><raw_payload>` using `x-client-secret` as key. Header: `x-webhook-signature`. Plan D's pattern signature verification (`hmac.compare_digest`) applied cleanly.
+- `cf_payment_id` and `order_id` are both valid event_id sources for webhook dedup. Connector checks both with a fallback.
+
+**Lessons:**
+- Cashfree auto-captures by default — explicit Capture flow is rarely needed. Implemented as `raise ConnectorError(...)` with clear message pointing callers to PSync (post-capture status fetch).
+- Void doesn't exist as a separate endpoint — pre-capture cancellation is just an early refund. Same `raise ConnectorError(...)` + documentation approach.
+- RSync requires both `order_id` AND `refund_id` in the URL, but `RSyncRequest` only carries `connector_refund_id`. Worked around by encoding `connector_refund_id` as `"order_id:refund_id"` during Refund and parsing it back during RSync. Worth considering a richer RSyncRequest shape in Plan C / Plan F.
+- Cashfree uses **decimal rupees** (not minor units) on the wire — divided/multiplied by 100 in the transformers. Used `int(round(...))` on the reverse direction to avoid float-precision drift on amounts like ₹100.50.
+- mypy strict required explicit `isinstance(payload, dict)` after `json.loads` (returns `Any`). Defensive narrowing.
+
+**Patterns that worked well:**
+- `from_*_response(resp, mapped_status)` taking mapped status as a parameter (Plan D hotfix) cleanly separated transformer from status-mapping.
+- Router-layer webhook dedup (Plan C hotfix) means the connector body just signs/parses/normalizes — no app.state plumbing needed in the connector itself.
+- Per-connector Auth subclass (CashfreeAuth extends BaseAuth) with extra `client_id` field — the AuthCls hook on BaseConnector made this clean.
+
+**Subagent-driven execution outcomes:**
+- Connector implementation passed mypy --strict on first attempt (with the documented judgment calls around `self._auth` type-narrowing).
+- 9 integration tests passed on first run — no template adjustments needed. Cashfree's API shape mapped to Plan D's pattern templates almost mechanically.
+- Pre-existing mypy strict violations in `tests/contract/` and `tests/unit/` surfaced during the gate — out of scope for Plan E but worth a follow-up cleanup (tracked).
+
+**Open follow-ups:**
+- Live sandbox verification against developer.cashfree.com test creds.
+- Wave 2: SetupMandate (Cashfree subscription/eMandate flow), RepeatPayment (UPI Autopay), DefendDispute.
+- Tightening pre-existing mypy errors in `tests/contract/` and `tests/unit/`.
+- Richer `RSyncRequest` shape so RSync doesn't need composite-id encoding (or accept that pattern as standard).
