@@ -55,8 +55,9 @@ class {Connector}(BaseConnector):
         )
         http_response.raise_for_status()
         psp_response = {Connector}AuthorizeResponse.model_validate_json(http_response.text)
-        data.response = from_authorize_response(psp_response)
-        data.status = _map_status(psp_response.status)
+        mapped = _map_status(psp_response.status)
+        data.response = from_authorize_response(psp_response, mapped)
+        data.status = mapped
         return data
 
     def _auth_headers(self) -> dict[str, str]:
@@ -81,11 +82,11 @@ register_connector("{connector}", {Connector})
 In `connector_service/connectors/{connector}/transformers.py`:
 
 ```python
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from connector_service.domain_types import (
     AttemptStatus, AuthorizeRequest, AuthorizeResponse,
-    CardData, UpiData, WalletData,
+    CardData, PaymentMethodInput, UpiData, WalletData,
 )
 
 
@@ -118,15 +119,17 @@ def to_authorize_request(req: AuthorizeRequest) -> {Connector}AuthorizeRequest:
     )
 
 
-def from_authorize_response(resp: {Connector}AuthorizeResponse) -> AuthorizeResponse:
+def from_authorize_response(
+    resp: {Connector}AuthorizeResponse, mapped_status: AttemptStatus
+) -> AuthorizeResponse:
     return AuthorizeResponse(
         connector_payment_id=resp.id,
-        status=AttemptStatus.PENDING,  # decorator overrides with mapped value
+        status=mapped_status,
         raw_response=resp.model_dump(),
     )
 
 
-def _payment_method_block(pm) -> dict:
+def _payment_method_block(pm: PaymentMethodInput) -> dict[str, Any]:
     if isinstance(pm, CardData):
         return {"card": {"number": pm.card_number, "exp_month": pm.card_exp_month}}
     if isinstance(pm, UpiData):
@@ -136,33 +139,27 @@ def _payment_method_block(pm) -> dict:
     raise NotImplementedError(f"Payment method {type(pm).__name__} not supported")
 
 
-def _pm_type(pm) -> str:
+def _pm_type(pm: PaymentMethodInput) -> str:
     if isinstance(pm, CardData): return "card"
     if isinstance(pm, UpiData): return "upi"
     if isinstance(pm, WalletData): return "wallet"
-    raise NotImplementedError(...)
+    raise NotImplementedError(f"Payment method {type(pm).__name__} not supported")
 ```
 
 Refer to the per-PM patterns under `authorize/{card,wallet,upi}/` for payment-method-specific transformer logic.
 
 ## 🧪 Testing Strategy
 
-Author `connector-service-python/tests/integration/test_{connector}.py`:
+Author `connector-service-python/tests/integration/test_{connector}.py`. The
+`client` fixture is provided by `tests/conftest.py` — don't redefine it here.
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
 
-from connector_service.api.server import app
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 
 @pytest.mark.integration
-def test_authorize_card(client):
+def test_authorize_card(client: TestClient):
     response = client.post(
         "/v1/payments/authorize",
         headers={"Authorization": "Bearer test-key"},

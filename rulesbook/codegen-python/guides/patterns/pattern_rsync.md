@@ -45,13 +45,15 @@ class {Connector}(BaseConnector):
     ) -> PaymentData[RSyncRequest, RSyncResponse]:
         connector_refund_id = data.request.connector_refund_id
         http_response = await self.client.get(
-            f"{rsync_endpoint}".format(connector_refund_id=connector_refund_id),
+            "{rsync_endpoint}".format(connector_refund_id=connector_refund_id),
             headers=self._auth_headers(),
         )
         http_response.raise_for_status()
         psp_response = {Connector}RSyncResponse.model_validate_json(http_response.text)
-        data.response = from_rsync_response(psp_response)
-        data.refund_status = _map_status(psp_response.status)
+        mapped = _map_status(psp_response.status)
+        data.response = from_rsync_response(psp_response, mapped)
+        # data.status (envelope) is best-effort cross-flow consistency:
+        data.status = None  # rsync flows don't populate envelope-level status
         return data
 
 
@@ -87,32 +89,28 @@ class {Connector}RSyncResponse(BaseModel):
     # ... whatever the PSP returns
 
 
-def from_rsync_response(resp: {Connector}RSyncResponse) -> RSyncResponse:
+def from_rsync_response(
+    resp: {Connector}RSyncResponse, mapped_status: RefundStatus
+) -> RSyncResponse:
     return RSyncResponse(
         connector_refund_id=resp.id,
-        status=RefundStatus.PENDING,  # decorator overrides with mapped value
+        status=mapped_status,
         raw_response=resp.model_dump(),
     )
 ```
 
 ## 🧪 Testing Strategy
 
-Author `connector-service-python/tests/integration/test_{connector}.py`:
+Author `connector-service-python/tests/integration/test_{connector}.py`. The
+`client` fixture is provided by `tests/conftest.py` — don't redefine it here.
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
 
-from connector_service.api.server import app
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 
 @pytest.mark.integration
-def test_rsync(client):
+def test_rsync(client: TestClient):
     # Pre-condition: a real connector_refund_id from a prior refund call.
     response = client.post(
         "/v1/payments/rsync",
@@ -127,7 +125,8 @@ def test_rsync(client):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] in (
+    # RSync flows leave the envelope status None — read the typed RefundStatus off the response:
+    assert body["response"]["status"] in (
         "pending", "success", "failure", "transaction_failure", "manual_review",
     )
     assert body["response"]["connector_refund_id"] == "<id from prior refund>"

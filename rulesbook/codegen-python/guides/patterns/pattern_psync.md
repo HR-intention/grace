@@ -45,13 +45,14 @@ class {Connector}(BaseConnector):
     ) -> PaymentData[PSyncRequest, PSyncResponse]:
         connector_payment_id = data.request.connector_payment_id
         http_response = await self.client.get(
-            f"{psync_endpoint}".format(connector_payment_id=connector_payment_id),
+            "{psync_endpoint}".format(connector_payment_id=connector_payment_id),
             headers=self._auth_headers(),
         )
         http_response.raise_for_status()
         psp_response = {Connector}PSyncResponse.model_validate_json(http_response.text)
-        data.response = from_psync_response(psp_response)
-        data.status = _map_status(psp_response.status)
+        mapped = _map_status(psp_response.status)
+        data.response = from_psync_response(psp_response, mapped)
+        data.status = mapped
         return data
 
 
@@ -89,7 +90,9 @@ class {Connector}PSyncResponse(BaseModel):
     # ... whatever the PSP returns
 
 
-def from_psync_response(resp: {Connector}PSyncResponse) -> PSyncResponse:
+def from_psync_response(
+    resp: {Connector}PSyncResponse, mapped_status: AttemptStatus
+) -> PSyncResponse:
     amount_received: Optional[Amount] = None
     if resp.amount is not None and resp.currency is not None:
         amount_received = Amount(
@@ -97,7 +100,7 @@ def from_psync_response(resp: {Connector}PSyncResponse) -> PSyncResponse:
         )
     return PSyncResponse(
         connector_payment_id=resp.id,
-        status=AttemptStatus.PENDING,  # decorator overrides with mapped value
+        status=mapped_status,
         amount_received=amount_received,
         raw_response=resp.model_dump(),
     )
@@ -105,22 +108,16 @@ def from_psync_response(resp: {Connector}PSyncResponse) -> PSyncResponse:
 
 ## 🧪 Testing Strategy
 
-Author `connector-service-python/tests/integration/test_{connector}.py`:
+Author `connector-service-python/tests/integration/test_{connector}.py`. The
+`client` fixture is provided by `tests/conftest.py` — don't redefine it here.
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
 
-from connector_service.api.server import app
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 
 @pytest.mark.integration
-def test_psync(client):
+def test_psync(client: TestClient):
     # Pre-condition: a real connector_payment_id from a prior authorize call.
     # Either chain from test_authorize_card or seed it from creds/fixtures.
     response = client.post(

@@ -54,7 +54,7 @@ class {Connector}(BaseConnector):
         psp_request: {Connector}VoidRequest = to_void_request(data.request)
         # Most PSPs: POST. A few: DELETE — adapt per the tech spec.
         http_response = await self.client.post(
-            f"{void_endpoint}".format(connector_payment_id=connector_payment_id),
+            "{void_endpoint}".format(connector_payment_id=connector_payment_id),
             json=psp_request.model_dump(by_alias=True, exclude_none=True),
             headers={
                 **self._auth_headers(),
@@ -63,8 +63,9 @@ class {Connector}(BaseConnector):
         )
         http_response.raise_for_status()
         psp_response = {Connector}VoidResponse.model_validate_json(http_response.text)
-        data.response = from_void_response(psp_response)
-        data.status = _map_status(psp_response.status)
+        mapped = _map_status(psp_response.status)
+        data.response = from_void_response(psp_response, mapped)
+        data.status = mapped
         return data
 
 
@@ -109,32 +110,28 @@ def to_void_request(req: VoidRequest) -> {Connector}VoidRequest:
     )
 
 
-def from_void_response(resp: {Connector}VoidResponse) -> VoidResponse:
+def from_void_response(
+    resp: {Connector}VoidResponse, mapped_status: AttemptStatus
+) -> VoidResponse:
     return VoidResponse(
         connector_payment_id=resp.id,
-        status=AttemptStatus.VOIDED,  # decorator overrides with mapped value
+        status=mapped_status,
         raw_response=resp.model_dump(),
     )
 ```
 
 ## 🧪 Testing Strategy
 
-Author `connector-service-python/tests/integration/test_{connector}.py`:
+Author `connector-service-python/tests/integration/test_{connector}.py`. The
+`client` fixture is provided by `tests/conftest.py` — don't redefine it here.
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
 
-from connector_service.api.server import app
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 
 @pytest.mark.integration
-def test_void(client):
+def test_void(client: TestClient):
     # Pre-condition: a real connector_payment_id from a prior authorize call
     # that left the payment in AUTHORIZED state (NOT yet captured).
     response = client.post(

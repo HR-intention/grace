@@ -14,17 +14,18 @@ Placeholders: `{Connector}`, `{connector}`, `{upi_endpoint_field}` (PSP-specific
 
 ## 📋 Prerequisites
 
-Authorize flow (per `../../../../shared/flows.md`). UPI is a payment-method variant of Authorize.
+Authorize flow (per `../../../../../shared/flows.md`). UPI is a payment-method variant of Authorize.
 
 ## 🏗️ Template
 
 Extend the connector's `_payment_method_block` and `_pm_type` helpers:
 
 ```python
-from connector_service.domain_types import RedirectionData, UpiData, UpiFlowType
+from typing import Any
+from connector_service.domain_types import PaymentMethodInput, RedirectionData, UpiData, UpiFlowType
 
 
-def _payment_method_block(pm) -> dict:
+def _payment_method_block(pm: PaymentMethodInput) -> dict[str, Any]:
     if isinstance(pm, UpiData):
         if pm.upi_flow == UpiFlowType.COLLECT:
             if not pm.vpa:
@@ -40,7 +41,9 @@ def _payment_method_block(pm) -> dict:
 And in `from_authorize_response`, populate `redirection_data` for UPI Intent:
 
 ```python
-def from_authorize_response(resp: {Connector}AuthorizeResponse) -> AuthorizeResponse:
+def from_authorize_response(
+    resp: {Connector}AuthorizeResponse, mapped_status: AttemptStatus
+) -> AuthorizeResponse:
     redirection = None
     if resp.upi_intent_url:  # PSP-specific field name from tech spec
         redirection = RedirectionData(
@@ -49,13 +52,13 @@ def from_authorize_response(resp: {Connector}AuthorizeResponse) -> AuthorizeResp
         )
     return AuthorizeResponse(
         connector_payment_id=resp.id,
-        status=_map_status(resp.status),
+        status=mapped_status,
         redirection_data=redirection,
         raw_response=resp.model_dump(),
     )
 ```
 
-For UPI Collect, no `redirection_data` is set; the customer's UPI app receives a push notification from the PSP. The connector returns `AttemptStatus.PENDING`; the eventual `CHARGED` or `FAILURE` status arrives via `incoming_webhook` (see [`../../../pattern_IncomingWebhook_flow.md`](../../../pattern_IncomingWebhook_flow.md)).
+For UPI Collect, no `redirection_data` is set; the customer's UPI app receives a push notification from the PSP. The connector returns `AttemptStatus.PENDING`; the eventual `CHARGED` or `FAILURE` status arrives via `incoming_webhook` (see [`../../pattern_IncomingWebhook_flow.md`](../../pattern_IncomingWebhook_flow.md)).
 
 ## 🧪 Testing Strategy
 

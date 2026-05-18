@@ -13,10 +13,11 @@ Authorize flow.
 ## 🏗️ Template
 
 ```python
-from connector_service.domain_types import CardData
+from typing import Any
+from connector_service.domain_types import CardData, PaymentMethodInput
 
 
-def _payment_method_block(pm) -> dict:
+def _payment_method_block(pm: PaymentMethodInput) -> dict[str, Any]:
     if isinstance(pm, CardData):
         return {
             "card": {

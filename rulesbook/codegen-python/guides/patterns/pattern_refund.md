@@ -53,7 +53,7 @@ class {Connector}(BaseConnector):
         connector_payment_id = data.request.connector_payment_id
         psp_request: {Connector}RefundRequest = to_refund_request(data.request)
         http_response = await self.client.post(
-            f"{refund_endpoint}".format(connector_payment_id=connector_payment_id),
+            "{refund_endpoint}".format(connector_payment_id=connector_payment_id),
             json=psp_request.model_dump(by_alias=True, exclude_none=True),
             headers={
                 **self._auth_headers(),
@@ -62,8 +62,10 @@ class {Connector}(BaseConnector):
         )
         http_response.raise_for_status()
         psp_response = {Connector}RefundResponse.model_validate_json(http_response.text)
-        data.response = from_refund_response(psp_response)
-        data.refund_status = _map_status(psp_response.status)
+        mapped = _map_status(psp_response.status)
+        data.response = from_refund_response(psp_response, mapped)
+        # data.status (envelope) is best-effort cross-flow consistency:
+        data.status = None  # refund flows don't populate envelope-level status
         return data
 
 
@@ -114,10 +116,12 @@ def to_refund_request(req: RefundRequest) -> {Connector}RefundRequest:
     )
 
 
-def from_refund_response(resp: {Connector}RefundResponse) -> RefundResponse:
+def from_refund_response(
+    resp: {Connector}RefundResponse, mapped_status: RefundStatus
+) -> RefundResponse:
     return RefundResponse(
         connector_refund_id=resp.id,
-        status=RefundStatus.PENDING,  # decorator overrides with mapped value
+        status=mapped_status,
         refund_amount=Amount(
             minor_units=resp.amount,
             currency=Currency(resp.currency),
@@ -128,22 +132,16 @@ def from_refund_response(resp: {Connector}RefundResponse) -> RefundResponse:
 
 ## 🧪 Testing Strategy
 
-Author `connector-service-python/tests/integration/test_{connector}.py`:
+Author `connector-service-python/tests/integration/test_{connector}.py`. The
+`client` fixture is provided by `tests/conftest.py` — don't redefine it here.
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
 
-from connector_service.api.server import app
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 
 @pytest.mark.integration
-def test_refund(client):
+def test_refund(client: TestClient):
     # Pre-condition: a real connector_payment_id from a prior CAPTURED payment.
     response = client.post(
         "/v1/payments/refund",
@@ -160,7 +158,8 @@ def test_refund(client):
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] in (
+    # Refund flows leave the envelope status None — read the typed RefundStatus off the response:
+    assert body["response"]["status"] in (
         "pending", "success", "failure", "transaction_failure", "manual_review",
     )
     refund_id = body["response"]["connector_refund_id"]

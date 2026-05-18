@@ -47,7 +47,7 @@ class {Connector}(BaseConnector):
         connector_payment_id = data.request.connector_payment_id
         psp_request: {Connector}CaptureRequest = to_capture_request(data.request)
         http_response = await self.client.post(
-            f"{capture_endpoint}".format(connector_payment_id=connector_payment_id),
+            "{capture_endpoint}".format(connector_payment_id=connector_payment_id),
             json=psp_request.model_dump(by_alias=True, exclude_none=True),
             headers={
                 **self._auth_headers(),
@@ -56,8 +56,9 @@ class {Connector}(BaseConnector):
         )
         http_response.raise_for_status()
         psp_response = {Connector}CaptureResponse.model_validate_json(http_response.text)
-        data.response = from_capture_response(psp_response, data.request)
-        data.status = _map_status(psp_response.status)
+        mapped = _map_status(psp_response.status)
+        data.response = from_capture_response(psp_response, data.request, mapped)
+        data.status = mapped
         return data
 
 
@@ -103,11 +104,11 @@ def to_capture_request(req: CaptureRequest) -> {Connector}CaptureRequest:
 
 
 def from_capture_response(
-    resp: {Connector}CaptureResponse, req: CaptureRequest
+    resp: {Connector}CaptureResponse, req: CaptureRequest, mapped_status: AttemptStatus
 ) -> CaptureResponse:
     return CaptureResponse(
         connector_payment_id=resp.id,
-        status=AttemptStatus.CHARGED,  # decorator overrides with mapped value
+        status=mapped_status,
         amount_captured=Amount(
             minor_units=resp.amount_captured,
             currency=Currency(resp.currency),
@@ -118,22 +119,16 @@ def from_capture_response(
 
 ## 🧪 Testing Strategy
 
-Author `connector-service-python/tests/integration/test_{connector}.py`:
+Author `connector-service-python/tests/integration/test_{connector}.py`. The
+`client` fixture is provided by `tests/conftest.py` — don't redefine it here.
 
 ```python
 import pytest
 from fastapi.testclient import TestClient
 
-from connector_service.api.server import app
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
 
 @pytest.mark.integration
-def test_capture(client):
+def test_capture(client: TestClient):
     # Pre-condition: a real connector_payment_id from a prior authorize call
     # that left the payment in AUTHORIZED state.
     response = client.post(
