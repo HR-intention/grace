@@ -145,7 +145,8 @@ class TechspecWorkflow:
                      mock_server: bool = False,
                      enhance: bool = False,
                      test_only: bool = False,
-                     verbose: bool = False) -> Dict[str, Any]:
+                     verbose: bool = False,
+                     target_lang: str = "python") -> Dict[str, Any]:
         """Execute the techspec workflow."""
         config = get_config().getTechSpecConfig()
 
@@ -165,6 +166,7 @@ class TechspecWorkflow:
             "config": config,
             "test_only": test_only,
             "verbose": verbose,
+            "target_lang": target_lang,
             "final_output": {},
             "warnings": [],
             "error": None,
@@ -214,6 +216,7 @@ async def run_techspec_workflow(connector_name: str,
                                enhance: bool = False,
                                test_only: bool = False,
                                verbose: bool = False,
+                               target_lang: str = "python",
                                ) -> Dict[str, Any]:
     workflow = create_techspec_workflow()
     return await workflow.execute(
@@ -224,5 +227,6 @@ async def run_techspec_workflow(connector_name: str,
         mock_server=mock_server,
         enhance=enhance,
         test_only=test_only,
-        verbose=verbose
+        verbose=verbose,
+        target_lang=target_lang,
     )

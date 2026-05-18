@@ -30,12 +30,16 @@ def cli():
 @click.argument('connector', required=False)
 @click.option('folder', '-f', help="Path to docs folder")
 @click.option('urls', '-u', help="Path to URLs file")
+@click.option('-l', '--target-lang',
+              type=click.Choice(['rust', 'python'], case_sensitive=False),
+              default='python',
+              help='Target language for codegen. Default: python.')
 @click.option('--output', '-o', help='Output directory for generated specs')
 @click.option('--test-only', is_flag=True, help='Run in test mode without generating files')
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 @click.option('--mock-server', '-m', is_flag=True, help='Enable mock server for testing')
 @click.option('--enhance', '-e', is_flag=True, help='Enable Claude Agent SDK enhancement')
-def techspec(connector, folder, urls, output, test_only, verbose, mock_server, enhance):
+def techspec(connector, folder, urls, target_lang, output, test_only, verbose, mock_server, enhance):
     """Generate technical specification for a connector.
     
     CONNECTOR: Name of the connector (e.g., gigadat)
@@ -51,6 +55,7 @@ def techspec(connector, folder, urls, output, test_only, verbose, mock_server, e
             if verbose:
                 click.echo(f"Starting techspec workflow...")
                 click.echo(f"Connector: {connector}")
+                click.echo(f"Target language: {target_lang}")
                 if output:
                     click.echo(f"Output dir: {output}")
                 if mock_server:
@@ -76,6 +81,7 @@ def techspec(connector, folder, urls, output, test_only, verbose, mock_server, e
                 verbose=verbose,
                 mock_server=mock_server,
                 enhance=enhance,
+                target_lang=target_lang,
             )
 
             if result["success"]:
