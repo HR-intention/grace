@@ -1,3 +1,13 @@
+> **Language tagging convention**
+>
+> All entries below this preamble were authored when Grace only generated
+> Rust connectors. They are implicitly tagged `[lang:rust]`. New entries
+> from any language pack MUST start with one of:
+>
+> - `[lang:rust]` — Rust-specific (UCS) feedback
+> - `[lang:python]` — Python-specific feedback
+> - `[lang:*]` — Cross-cutting feedback applicable to all language packs
+
 # UCS Connector Code Quality Feedback Database
 
 ---

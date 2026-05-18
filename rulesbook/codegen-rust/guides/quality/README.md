@@ -100,7 +100,7 @@ Quality Guardian reviews code at these checkpoints:
          ▼
 ┌──────────────────────────────────────────┐
 │ STEP 1: Load Knowledge Base              │
-│  • Read guides/feedback.md               │
+│  • Read ../shared/feedback.md               │
 │  • Extract relevant patterns             │
 │  • Prepare quality checklist             │
 └────────┬─────────────────────────────────┘
@@ -222,7 +222,7 @@ Result: ⚠️ FAIR - Pass with warnings
 
 **Steps:**
 ```markdown
-1. Read guides/feedback.md completely
+1. Read ../shared/feedback.md completely
 2. Extract patterns relevant to current phase/flow
 3. Prepare quality checklist from applicable feedback
 4. Load quality_review_template.md
@@ -291,7 +291,7 @@ Result: ⚠️ FAIR - Pass with warnings
 
 ### Structure
 
-The feedback database (`guides/feedback.md`) is organized into:
+The feedback database (`../shared/feedback.md`) is organized into:
 
 1. **Quality Review Template** (Top of file)
    - Template for generating review reports
@@ -619,7 +619,7 @@ A: After every quality review that identifies new patterns or observes existing 
 
 **For Your First Implementation:**
 
-1. Read `guides/feedback.md` - Section 1: Critical Patterns
+1. Read `../shared/feedback.md` - Section 1: Critical Patterns
 2. Review flow-specific patterns for your target flow
 3. Start implementation following UCS templates
 4. Pass quality review at each checkpoint

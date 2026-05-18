@@ -564,7 +564,7 @@ You are the Quality Guardian Subagent. Your responsibility is to ensure code qua
 #### STEP 1: Load Knowledge Base
 ```bash
 # Read the complete feedback database
-Read: guides/feedback.md
+Read: ../shared/feedback.md
 
 # Extract review template from top of feedback.md
 Extract: Quality Review Report Template
@@ -717,7 +717,7 @@ ELSE:
 #### STEP 4: Generate Review Report
 ```bash
 # Use template from guides/quality/quality_review_template.md
-# OR use template from top of guides/feedback.md
+# OR use template from top of ../shared/feedback.md
 
 # Fill in all template sections:
 1. Overall Quality Score: [calculated score]/100
@@ -785,7 +785,7 @@ IF status == "PASS":
 
 #### STEP 6: Update Knowledge Base
 ```bash
-# Update guides/feedback.md with new learnings
+# Update ../shared/feedback.md with new learnings
 
 For each new pattern discovered:
     1. Choose appropriate feedback ID from ranges
@@ -951,7 +951,7 @@ Quality Guardian MUST block progression if:
 
 ### If Quality Review Fails to Complete
 ```bash
-1. Check guides/feedback.md exists and is readable
+1. Check ../shared/feedback.md exists and is readable
 2. Check guides/quality/ directory structure
 3. Verify files to review exist
 4. Report error to main workflow controller

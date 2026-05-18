@@ -230,7 +230,7 @@ Thresholds:
 ### 1. Pre-Review Preparation
 ```bash
 # Read the feedback database
-Read: guides/feedback.md
+Read: ../shared/feedback.md
 
 # Identify relevant patterns for current flow
 Extract: Flow-specific patterns

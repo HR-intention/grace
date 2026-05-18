@@ -594,10 +594,10 @@ Thresholds:
 
 ### Feedback Database
 
-All quality issues and success patterns are captured in `guides/feedback.md`:
+All quality issues and success patterns are captured in `../shared/feedback.md`:
 
 ```
-guides/feedback.md
+../shared/feedback.md
 ├── Quality Review Template
 ├── Section 1: Critical Patterns (Must Follow)
 ├── Section 2: UCS-Specific Guidelines
