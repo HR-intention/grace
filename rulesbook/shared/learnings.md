@@ -1,3 +1,10 @@
+> **Language tagging convention**
+>
+> All entries below this preamble were authored when Grace only generated
+> Rust connectors. They are implicitly tagged `[lang:rust]`. New entries
+> from any language pack MUST start with one of `[lang:rust]`,
+> `[lang:python]`, or `[lang:*]`.
+
 # UCS Connector Implementation Learnings & User Feedback
 
 This file captures lessons learned from UCS connector implementations and user feedback to continuously improve AI-generated code quality.

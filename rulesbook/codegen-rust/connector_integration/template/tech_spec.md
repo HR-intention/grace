@@ -38,7 +38,7 @@ Integration of the {{connector_name}} connector to UCS connector-service
 | Document | Purpose |
 | `grace-ucs/guides/types/types.md` | UCS type definitions and data structures |
 | `grace-ucs/guides/patterns/patterns.md` | UCS implementation patterns |
-| `grace-ucs/guides/learnings/learnings.md` | Lessons from previous UCS integrations |
+| `grace-ucs/shared/learnings.md` | Lessons from previous UCS integrations |
 | `grace-ucs/guides/errors/errors.md` | UCS error handling strategies |
 
 ### UCS ConnectorCommon
