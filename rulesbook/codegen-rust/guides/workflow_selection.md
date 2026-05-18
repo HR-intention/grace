@@ -9,17 +9,17 @@ What do you need to do?
 │
 ├── New connector from scratch?
 │   └── Use .gracerules
-│       Command: integrate {Connector} using grace/rulesbook/codegen/.gracerules
+│       Command: integrate {Connector} using grace/rulesbook/codegen-rust/.gracerules
 │
 ├── Add to existing connector?
 │   │
 │   ├── Add a flow (Authorize, Capture, Refund, etc.)?
 │   │   └── Use .gracerules_add_flow
-│       Command: add {flow} flow to {Connector} using grace/rulesbook/codegen/.gracerules_add_flow
+│       Command: add {flow} flow to {Connector} using grace/rulesbook/codegen-rust/.gracerules_add_flow
 │   │
 │   └── Add a payment method (Apple Pay, Cards, etc.)?
 │       └── Use .gracerules_add_payment_method
-│           Command: add {payment_method} to {Connector} using grace/rulesbook/codegen/.gracerules_add_payment_method
+│           Command: add {payment_method} to {Connector} using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
 │
 └── Fix or improve existing connector?
     └── Use .gracerules_flow (for flow fixes) or manual editing
@@ -48,13 +48,13 @@ What do you need to do?
 
 ```bash
 # Explicit form (recommended)
-integrate {ConnectorName} using grace/rulesbook/codegen/.gracerules
-integrate Stripe using grace/rulesbook/codegen/.gracerules
+integrate {ConnectorName} using grace/rulesbook/codegen-rust/.gracerules
+integrate Stripe using grace/rulesbook/codegen-rust/.gracerules
 ```
 
 **Prerequisites:**
 
-- Tech spec placed in `grace/rulesbook/codegen/references/{connector_name}/technical_specification.md`
+- Tech spec placed in `grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md`
 
 **Output:**
 
@@ -83,9 +83,9 @@ integrate Stripe using grace/rulesbook/codegen/.gracerules
 
 ```bash
 # Explicit form (recommended)
-add {flow_name} flow to {connector_name} using grace/rulesbook/codegen/.gracerules_add_flow
-add Refund flow to Stripe using grace/rulesbook/codegen/.gracerules_add_flow
-add Capture and Void flows to Adyen using grace/rulesbook/codegen/.gracerules_add_flow
+add {flow_name} flow to {connector_name} using grace/rulesbook/codegen-rust/.gracerules_add_flow
+add Refund flow to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_flow
+add Capture and Void flows to Adyen using grace/rulesbook/codegen-rust/.gracerules_add_flow
 ```
 
 **Supported Flows:**
@@ -133,10 +133,10 @@ add Capture and Void flows to Adyen using grace/rulesbook/codegen/.gracerules_ad
 
 ```bash
 # Explicit form (required) - Category prefix syntax
-add {Category}:{payment_method1},{payment_method2} to {connector_name} using grace/rulesbook/codegen/.gracerules_add_payment_method
-add Wallet:Apple Pay,Google Pay and Card:Credit,Debit to Stripe using grace/rulesbook/codegen/.gracerules_add_payment_method
-add Wallet:PayPal and BankTransfer:SEPA,ACH to Wise using grace/rulesbook/codegen/.gracerules_add_payment_method
-add UPI:Collect,Intent to PhonePe using grace/rulesbook/codegen/.gracerules_add_payment_method
+add {Category}:{payment_method1},{payment_method2} to {connector_name} using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
+add Wallet:Apple Pay,Google Pay and Card:Credit,Debit to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
+add Wallet:PayPal and BankTransfer:SEPA,ACH to Wise using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
+add UPI:Collect,Intent to PhonePe using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
 ```
 
 **Supported Payment Methods:**
@@ -193,8 +193,8 @@ _Category Names:_ Card, Wallet, BankTransfer, BankDebit, BankRedirect, UPI, BNPL
 
 **Steps:**
 
-1. Create tech spec at `grace/rulesbook/codegen/references/newpay/technical_specification.md`
-2. Run: `integrate NewPay using grace/rulesbook/codegen/.gracerules`
+1. Create tech spec at `grace/rulesbook/codegen-rust/references/newpay/technical_specification.md`
+2. Run: `integrate NewPay using grace/rulesbook/codegen-rust/.gracerules`
 3. AI will create complete connector with all 6 core flows
 
 ---
@@ -255,7 +255,7 @@ add Refund and Void flows to MyConnector
 **Option B - Continue with complete integration:**
 
 ```bash
-integrate MyConnector using grace/rulesbook/codegen/.gracerules
+integrate MyConnector using grace/rulesbook/codegen-rust/.gracerules
 ```
 
 (Will detect existing flows and continue from there)
@@ -274,7 +274,7 @@ integrate MyConnector using grace/rulesbook/codegen/.gracerules
 fix error handling in Stripe Refund flow
 ```
 
-Or manually edit using patterns from `guides/flows/refund/`
+Or manually edit using patterns from `guides/patterns/pattern_refund.md`
 
 ---
 
@@ -294,26 +294,26 @@ Or manually edit using patterns from `guides/flows/refund/`
 ### Flow Patterns
 
 ```
-guides/flows/{flow_name}/pattern_{flow_name}.md
+guides/patterns/pattern_{flow_name}.md
 ```
 
 Examples:
 
-- `flows/authorize/pattern_authorize.md`
-- `flows/capture/pattern_capture.md`
-- `flows/refund/pattern_refund.md`
+- `guides/patterns/pattern_authorize.md`
+- `guides/patterns/pattern_capture.md`
+- `guides/patterns/pattern_refund.md`
 
 ### Payment Method Patterns
 
 ```
-guides/flows/authorize/{payment_method}.md
+guides/patterns/authorize/{payment_method}/pattern_authorize_{payment_method}.md
 ```
 
 Examples:
 
-- `flows/authorize/card.md`
-- `flows/authorize/wallet.md`
-- `flows/authorize/bank_transfer.md`
+- `guides/patterns/authorize/card/pattern_authorize_card.md`
+- `guides/patterns/authorize/wallet/pattern_authorize_wallet.md`
+- `guides/patterns/authorize/bank_transfer/pattern_authorize_bank_transfer.md`
 
 ## Tips for Best Results
 
@@ -345,7 +345,6 @@ Examples:
 
 ## Related Documentation
 
-- [Patterns README](./patterns/README.md) - Pattern overview
-- [Flows README](./flows/README.md) - Flow patterns index
+- [Patterns README](./patterns/README.md) - Pattern overview and full index
 - [Connector Integration Guide](./connector_integration_guide.md) - Step-by-step integration
 - [Quality Guide](./quality/README.md) - Code quality standards

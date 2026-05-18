@@ -1145,7 +1145,7 @@ mod integration_tests {
 Before writing custom utility functions, **ALWAYS** check the `utility_functions_reference.md` guide. Many common operations already have optimized implementations that you should reuse.
 
 ### Required Reading
-📚 **Reference Guide:** `/rulesbook/codegen/guides/utility_functions_reference.md`
+📚 **Reference Guide:** `/rulesbook/codegen-rust/guides/utility_functions_reference.md`
 
 This guide contains pre-built utilities for:
 - Country code conversions

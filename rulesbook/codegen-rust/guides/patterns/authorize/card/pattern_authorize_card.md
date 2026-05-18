@@ -961,11 +961,11 @@ mod tests {
 
 ## Cross-References
 
-- [pattern_authorize.md](./pattern_authorize.md) - General authorize flow patterns
-- [Authorize Flow Documentation](../../flows/authorize.md) - Authorize flow implementation guide
-- [3DS Flow Documentation](../../flows/threeds.md) - 3D Secure implementation guide
-- [Capture Flow Documentation](../../flows/capture.md) - Capture flow for manual capture
-- [Refund Flow Documentation](../../flows/refund.md) - Refund implementation patterns
+- [pattern_authorize.md](../../pattern_authorize.md) - General authorize flow patterns
+- [Capture Flow Pattern](../../pattern_capture.md) - Capture flow for manual capture
+- [Refund Flow Pattern](../../pattern_refund.md) - Refund implementation patterns
+- [PSync Flow Pattern](../../pattern_psync.md) - Payment status synchronization
+- [Void Flow Pattern](../../pattern_void.md) - Void/cancel authorization
 
 ---
 
