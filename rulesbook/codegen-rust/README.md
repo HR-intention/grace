@@ -161,49 +161,12 @@ debug PayPal connector - getting timeout errors
 
 ## 📋 Comprehensive Flow Support
 
-### Core Payment Flows (6 Essential Flows)
+The authoritative list of flows and their prerequisite DAG lives in
+[`../shared/flows.md`](../shared/flows.md). It applies to every language
+pack equally.
 
-| Flow | Pattern File | Dependencies | Description |
-|------|--------------|--------------|-------------|
-| **Authorize** | `flows/authorize/pattern_authorize.md` | None | Initial payment authorization |
-| **PSync** | `flows/psync/pattern_psync.md` | Authorize | Payment status synchronization |
-| **Capture** | `flows/capture/pattern_capture.md` | Authorize | Capture authorized payments |
-| **Void** | `flows/void/pattern_void.md` | Authorize | Cancel authorized payments |
-| **Refund** | `flows/refund/pattern_refund.md` | Capture | Full and partial refunds |
-| **RSync** | `flows/rsync/pattern_rsync.md` | Refund | Refund status synchronization |
-
-### Advanced Flows
-
-| Flow | Pattern File | Dependencies | Description |
-|------|--------------|--------------|-------------|
-| **SetupMandate** | `flows/setup_mandate/` | Authorize | Set up recurring payments |
-| **RepeatPayment** | `flows/repeat_payment/` | SetupMandate | Process recurring payments |
-| **IncomingWebhook** | `flows/IncomingWebhook/` | PSync | Real-time event handling |
-| **CreateOrder** | `flows/createorder/` | - | Multi-step payment initiation |
-| **SessionToken** | `flows/session_token/` | - | Secure session management |
-| **PaymentMethodToken** | `flows/payment_method_token/` | - | Tokenize payment methods |
-| **DefendDispute** | `flows/defend_dispute/` | - | Defend chargebacks |
-| **AcceptDispute** | `flows/accept_dispute/` | - | Accept chargebacks |
-| **DSync** | `flows/dsync/` | - | Dispute status synchronization |
-| **MandateRevoke** | `flows/mandate_revoke/` | SetupMandate | Cancel stored mandates |
-| **IncrementalAuthorization** | `flows/IncrementalAuthorization/` | Authorize | Incremental auth flow |
-| **VoidPC** | `flows/void_pc/` | Capture | Void post-capture |
-
-### Payment Method Patterns (for Authorize Flow)
-
-| Payment Method | Pattern File | Supported Flows |
-|----------------|--------------|-----------------|
-| **Card** | `flows/authorize/card.md` | All flows |
-| **Wallet** | `flows/authorize/wallet.md` | Authorize, Refund |
-| **Bank Transfer** | `flows/authorize/bank_transfer.md` | Authorize, Refund |
-| **Bank Debit** | `flows/authorize/bank_debit.md` | Authorize, Refund |
-| **Bank Redirect** | `flows/authorize/bank_redirect.md` | Authorize |
-| **UPI** | `flows/authorize/upi.md` | Authorize, Refund |
-| **BNPL** | `flows/authorize/bnpl.md` | Authorize, Refund |
-| **Crypto** | `flows/authorize/crypto.md` | Authorize |
-| **Gift Card** | `flows/authorize/gift_card.md` | Authorize |
-| **Mobile Payment** | `flows/authorize/mobile_payment.md` | Authorize, Refund |
-| **Reward** | `flows/authorize/reward.md` | Authorize |
+Each entry in `flows.md` references a `pattern_<flow>.md` file located in
+this pack's `guides/patterns/` directory.
 
 ## 🔄 Workflow Selection Guide
 
