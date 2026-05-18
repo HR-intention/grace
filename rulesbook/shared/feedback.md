@@ -2974,33 +2974,40 @@ All entries have frequency: 1 (first occurrence from worldpay connector review)
 
 ## [lang:python] Cashfree integration — Plan E (2026-05-19)
 
-**Outcome:** SUCCESS. Quality score: 100/100.
+**Outcome:** SUCCESS (after hotfix). Quality score: 85/100 (mypy clean, 28 tests passing, but live sandbox not yet verified).
 
 **Highlights:**
-- Cashfree's order/payment two-step is flattenable to a single `authorize()` call by capturing `payment_session_id` from the order-create response.
-- UPI Collect uses `upi.channel="collect"` + `upi.upi_id=<vpa>`. UPI Intent uses `upi.channel="link"` and returns a deep-link URL surfaced as `RedirectionData(method="INTENT", url=upi://...)`.
-- Webhook signature scheme is HMAC-SHA256 base64 of `<x-webhook-timestamp><raw_payload>` using `x-client-secret` as key. Header: `x-webhook-signature`. Plan D's pattern signature verification (`hmac.compare_digest`) applied cleanly.
-- `cf_payment_id` and `order_id` are both valid event_id sources for webhook dedup. Connector checks both with a fallback.
+- Cashfree's order/payment two-step is implemented as a single `authorize()` that does `POST /orders` → `POST /orders/sessions`. UPI Intent surfaces the real `data.url` deep link from the sessions response.
+- UPI Collect uses `payment_method.upi.channel="collect"` + `upi.upi_id=<vpa>` on the sessions call. UPI Intent uses `upi.channel="link"`.
+- Webhook signature scheme is HMAC-SHA256 base64 of `<x-webhook-timestamp><raw_payload>` using `x-client-secret` as key. Header: `x-webhook-signature`. Plan D's `hmac.compare_digest` pattern applied cleanly.
+- `cf_payment_id` and `order_id` are both valid event_id sources for webhook dedup — connector checks both with a fallback.
 
-**Lessons:**
-- Cashfree auto-captures by default — explicit Capture flow is rarely needed. Implemented as `raise ConnectorError(...)` with clear message pointing callers to PSync (post-capture status fetch).
-- Void doesn't exist as a separate endpoint — pre-capture cancellation is just an early refund. Same `raise ConnectorError(...)` + documentation approach.
-- RSync requires both `order_id` AND `refund_id` in the URL, but `RSyncRequest` only carries `connector_refund_id`. Worked around by encoding `connector_refund_id` as `"order_id:refund_id"` during Refund and parsing it back during RSync. Worth considering a richer RSyncRequest shape in Plan C / Plan F.
-- Cashfree uses **decimal rupees** (not minor units) on the wire — divided/multiplied by 100 in the transformers. Used `int(round(...))` on the reverse direction to avoid float-precision drift on amounts like ₹100.50.
-- mypy strict required explicit `isinstance(payload, dict)` after `json.loads` (returns `Any`). Defensive narrowing.
+**Lessons (genuine pitfalls future Python connectors will face):**
+- **Cashfree returns string IDs, not integers.** `cf_order_id`, `cf_refund_id`, `cf_payment_id` are all strings on the wire. Tech specs / mocks that assume `int` will pass tests then fail on real sandbox.
+- **PSP response models need `extra="ignore"`, not `extra="forbid"`.** Cashfree's real responses include many more fields than the docs explicitly enumerate (entity, created_at, customer_details, order_meta, etc.). Plan D pattern templates should differentiate: request models stay `extra="forbid"`, response models use `extra="ignore"`.
+- **Authorize is two HTTP calls for Cashfree.** Create order doesn't initiate payment; you must also POST to `/orders/sessions`. The connector hides this two-step behind a single `authorize()` method.
+- **Cashfree auto-captures by default** — explicit Capture flow is rarely needed. Implemented as `raise ConnectorError(...)` with clear message pointing callers to PSync. Same approach for Void (which doesn't exist as a separate endpoint).
+- **Cashfree uses decimal rupees on the wire** (not minor units). Transformers do `req.amount.minor_units / 100.0`. Used `int(round(...))` on the reverse to avoid float-precision drift on amounts like ₹100.50, but the float wire format itself is a subtle drift hazard for amounts like ₹100.05 — flagged for follow-up (use Decimal or `f"{x:.2f}"`).
+- **RSync requires both `order_id` AND `refund_id`** but `RSyncRequest` only carries `connector_refund_id`. Workaround: encode `connector_refund_id` as `"order_id:refund_id"` during Refund. Plan F / Plan C revision should add a richer RSyncRequest shape.
 
 **Patterns that worked well:**
 - `from_*_response(resp, mapped_status)` taking mapped status as a parameter (Plan D hotfix) cleanly separated transformer from status-mapping.
 - Router-layer webhook dedup (Plan C hotfix) means the connector body just signs/parses/normalizes — no app.state plumbing needed in the connector itself.
 - Per-connector Auth subclass (CashfreeAuth extends BaseAuth) with extra `client_id` field — the AuthCls hook on BaseConnector made this clean.
 
-**Subagent-driven execution outcomes:**
-- Connector implementation passed mypy --strict on first attempt (with the documented judgment calls around `self._auth` type-narrowing).
-- 9 integration tests passed on first run — no template adjustments needed. Cashfree's API shape mapped to Plan D's pattern templates almost mechanically.
-- Pre-existing mypy strict violations in `tests/contract/` and `tests/unit/` surfaced during the gate — out of scope for Plan E but worth a follow-up cleanup (tracked).
+**Known-not-yet-verified for live sandbox:**
+- Real Cashfree sandbox credentials needed for actual call verification.
+- `x-idempotency-key` format compatibility — Cashfree may reject uuid4 strings with hyphens (docs say "3-40 alphanumeric chars" for refund_id).
+- `x-api-version` header is hardcoded to `2025-01-01`; merchants on older versions need to override.
+- Money wire format uses `float` — fine for amounts ending in `.00`/`.50` but drifts on amounts like ₹100.05. Switch to `Decimal` or formatted string for Plan F.
+
+**Cross-plan seams worth tracking:**
+- Plan B's `TECHSPEC_OUTPUT_DIR` is not language-aware: with `--target-lang python` the spec still lands wherever the env var points (currently `./rulesbook/codegen-rust/references/` by default), not in a per-language directory. Fix: auto-suffix `codegen-<lang>/` to the output path.
+- Plan B's generated spec for Cashfree captured endpoints and base URL but missed status enumerations, webhook signature scheme, and UPI flow specifics. The implementer compensated by reading docs directly. Prompt engineering in `src/ai/prompts/` should improve spec depth.
+- Plan D pattern templates uniformly use `ConfigDict(extra="forbid")` on Pydantic models. Should differentiate: request models forbid, response models ignore.
 
 **Open follow-ups:**
 - Live sandbox verification against developer.cashfree.com test creds.
+- Tighten money wire format (Decimal instead of float).
 - Wave 2: SetupMandate (Cashfree subscription/eMandate flow), RepeatPayment (UPI Autopay), DefendDispute.
-- Tightening pre-existing mypy errors in `tests/contract/` and `tests/unit/`.
-- Richer `RSyncRequest` shape so RSync doesn't need composite-id encoding (or accept that pattern as standard).
+- Plan-level fixes: language-aware TECHSPEC_OUTPUT_DIR; spec prompt depth; Plan D request-vs-response Pydantic config differentiation.
