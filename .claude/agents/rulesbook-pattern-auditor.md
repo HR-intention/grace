@@ -72,7 +72,7 @@ If the new pattern's stated prerequisites contradict this, flag it.
 
 ### 5. Feedback & quality alignment
 
-- Check [guides/feedback.md](rulesbook/codegen-rust/guides/feedback.md) for recurring issues in this flow type. The new pattern should pre-emptively address them.
+- Check [shared/feedback.md](rulesbook/shared/feedback.md) for recurring issues in this flow type. The new pattern should pre-emptively address them.
 - Verify the pattern doesn't violate any "Section 5: Common Anti-Patterns" entry.
 
 ### 6. Placeholder hygiene

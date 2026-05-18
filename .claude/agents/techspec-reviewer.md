@@ -20,7 +20,7 @@ If any of these are missing, ask the spawning agent for them before reviewing.
 
 ## What to check
 
-Use `rulesbook/codegen-rust/connector_integration/template/tech_spec.md` as the structural baseline. The spec is consumed by the `.gracerules` workflow — anything required by the rulesbook's flow patterns must be in the spec.
+Use `rulesbook/shared/tech_spec_template.md` as the structural baseline. The spec is consumed by the `.gracerules` workflow — anything required by the rulesbook's flow patterns must be in the spec.
 
 Check for:
 

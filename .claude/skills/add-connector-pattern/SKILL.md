@@ -68,8 +68,8 @@ For payment-method patterns, the category routing happens in `.gracerules_add_pa
 ## Final check — quality & feedback alignment
 
 Before considering the pattern done:
-1. Skim [guides/feedback.md](rulesbook/codegen-rust/guides/feedback.md) for past issues with this flow type — the new pattern should pre-emptively address them.
-2. Skim [guides/learnings/learnings.md](rulesbook/codegen-rust/guides/learnings/learnings.md) for relevant historical lessons.
+1. Skim [shared/feedback.md](rulesbook/shared/feedback.md) for past issues with this flow type — the new pattern should pre-emptively address them.
+2. Skim [shared/learnings.md](rulesbook/shared/learnings.md) for relevant historical lessons.
 3. Run the `rulesbook-pattern-auditor` subagent on the new file:
    ```
    Audit the new pattern at rulesbook/codegen-rust/guides/patterns/pattern_<flow>.md
