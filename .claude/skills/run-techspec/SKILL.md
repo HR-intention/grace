@@ -50,7 +50,7 @@ User asks to:
 | Validate flow without writing files | `--test-only` |
 | Custom output dir (overrides `TECHSPEC_OUTPUT_DIR`) | `-o ./somewhere` |
 
-Default output path: `${TECHSPEC_OUTPUT_DIR}/<connector>/technical_specification.md` (env var defaults to `./output`, but most workflows point it at `./rulesbook/codegen/references`).
+Default output path: `${TECHSPEC_OUTPUT_DIR}/<connector>/technical_specification.md` (env var defaults to `./output`, but most workflows point it at `./rulesbook/codegen-rust/references`).
 
 ## Standard invocations
 
@@ -77,7 +77,7 @@ grace techspec -f ./docs/unknown_psp -v
    ```
    Expect `technical_specification.md`. With `-e`: also `*_enhanced_spec.md`. With `-m`: also a `mock-server/` subdirectory.
 3. Skim the spec — open it and confirm it has Base URL, Auth, and at least one endpoint per target flow. If it's stubby, re-run with `-e` or add more source docs.
-4. **Do not commit the output.** `rulesbook/codegen/references/**` is gitignored on purpose — generated specs are local artifacts.
+4. **Do not commit the output.** `rulesbook/codegen-rust/references/**` is gitignored on purpose — generated specs are local artifacts.
 
 ## Common failure modes
 
@@ -95,7 +95,7 @@ grace techspec -f ./docs/unknown_psp -v
 Once the spec looks good, switch to the `connector-service` repo and invoke the codegen rulesbook:
 
 ```
-integrate <Connector> using grace/rulesbook/codegen/.gracerules
+integrate <Connector> using grace/rulesbook/codegen-rust/.gracerules
 ```
 
 (Or the appropriate `.gracerules_add_*` variant for incremental work.)

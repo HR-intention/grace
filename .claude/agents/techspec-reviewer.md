@@ -8,7 +8,7 @@ You are the **TechSpec Reviewer** for Grace. Your job is to read a generated tec
 
 ## When you run
 
-After `grace techspec <connector>` produces a spec in `rulesbook/codegen/references/<connector>/technical_specification.md` (or wherever `TECHSPEC_OUTPUT_DIR` points). The user invokes you before running `.gracerules*` codegen.
+After `grace techspec <connector>` produces a spec in `rulesbook/codegen-rust/references/<connector>/technical_specification.md` (or wherever `TECHSPEC_OUTPUT_DIR` points). The user invokes you before running `.gracerules*` codegen.
 
 ## Inputs (from the spawning agent)
 
@@ -20,7 +20,7 @@ If any of these are missing, ask the spawning agent for them before reviewing.
 
 ## What to check
 
-Use `rulesbook/codegen/connector_integration/template/tech_spec.md` as the structural baseline. The spec is consumed by the `.gracerules` workflow — anything required by the rulesbook's flow patterns must be in the spec.
+Use `rulesbook/codegen-rust/connector_integration/template/tech_spec.md` as the structural baseline. The spec is consumed by the `.gracerules` workflow — anything required by the rulesbook's flow patterns must be in the spec.
 
 Check for:
 
@@ -33,13 +33,13 @@ Check for:
 7. **Error codes**: error code list with messages and retry-ability. Generic "500 error" is not enough.
 8. **Webhooks** (if connector supports them): event types, payload shape, signature verification scheme.
 9. **Amount handling**: minor units vs decimal (cents vs dollars), supported currencies.
-10. **Payment-method-specific fields**: card fields, wallet token fields, bank routing fields — must match what `rulesbook/codegen/guides/patterns/authorize/<pm>/` expects.
+10. **Payment-method-specific fields**: card fields, wallet token fields, bank routing fields — must match what `rulesbook/codegen-rust/guides/patterns/authorize/<pm>/` expects.
 
 ## How to verify
 
 - Read the generated spec end-to-end first.
 - Then for each section above, grep / spot-check the source docs (PDFs via `pdftotext` if needed, or the URL markdown crawl output) to confirm the spec faithfully captured what's in the source. Look for **omissions**, **hallucinations**, and **wrong shapes**.
-- Cross-reference with `rulesbook/codegen/guides/patterns/pattern_<flow>.md` for the target flows — every required pattern input must be answerable from the spec.
+- Cross-reference with `rulesbook/codegen-rust/guides/patterns/pattern_<flow>.md` for the target flows — every required pattern input must be answerable from the spec.
 
 ## Output format
 
