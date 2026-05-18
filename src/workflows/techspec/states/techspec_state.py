@@ -42,6 +42,9 @@ class TechspecWorkflowState(TypedDict, total=False):
     test_only: bool
     verbose: bool
 
+    # Target language for codegen — "rust" or "python"
+    target_lang: str
+
     urls_file: Optional[str]
     # Input data
     urls: List[str]
