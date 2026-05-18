@@ -199,7 +199,7 @@ Result: ⚠️ FAIR - Pass with warnings
 
 | File | Purpose | When to Use |
 |------|---------|-------------|
-| [feedback.md](../feedback.md) | Master feedback database with review template | Reference before/during implementation |
+| [feedback.md](../../../shared/feedback.md) | Master feedback database with review template | Reference before/during implementation |
 | [quality_review_template.md](quality_review_template.md) | Standalone review template | For Quality Guardian during reviews |
 | [CONTRIBUTING_FEEDBACK.md](CONTRIBUTING_FEEDBACK.md) | Guide for adding feedback | When adding new patterns/issues |
 
@@ -210,7 +210,7 @@ Result: ⚠️ FAIR - Pass with warnings
 | [patterns/](../patterns/) | Flow-specific implementation patterns |
 | [connector_integration_guide.md](../connector_integration_guide.md) | Complete integration guide |
 | [types/types.md](../types/types.md) | UCS type system reference |
-| [learnings/learnings.md](../learnings/learnings.md) | Implementation lessons learned |
+| [learnings.md](../../../shared/learnings.md) | Implementation lessons learned |
 
 ---
 
