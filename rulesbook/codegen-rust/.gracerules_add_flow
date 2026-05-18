@@ -78,7 +78,7 @@ This workflow adds specific flows to an existing connector implementation.
 
 **IF CONNECTOR DOES NOT EXIST:**
 1. **DELEGATE TO**: Foundation Setup Subagent using add_connector.sh
-   - Run: `./grace/rulesbook/codegen/add_connector.sh {connector_name} pzen`
+   - Run: `./grace/rulesbook/codegen-rust/add_connector.sh {connector_name} pzen`
    - **WAIT FOR COMPLETION**
    - Validate connector foundation created successfully
 2. **DELEGATE TO**: Connector Mod Subagent
@@ -90,7 +90,7 @@ This workflow adds specific flows to an existing connector implementation.
 - Skip Phase 0 and proceed directly to Phase 1
 
 ### PHASE 1: TECH SPEC READING & CONNECTOR STATE ANALYSIS
-1. **MANDATORY**: Read tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+1. **MANDATORY**: Read tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 2. **MANDATORY**: Extract flow-specific requirements from tech spec
 3. **MANDATORY**: Detect current connector implementation state
 4. **MANDATORY**: Identify which flows are already implemented
@@ -120,14 +120,14 @@ Execute requested flows in EXACT sequence - each must complete before next begin
 This workflow activates when the user provides commands matching these patterns:
 
 ### Explicit Form (Required):
-- "add {flow_name} flow to {connector_name} using grace/rulesbook/codegen/.gracerules_add_flow"
-- "add {flow1} and {flow2} flows to {connector_name} using grace/rulesbook/codegen/.gracerules_add_flow"
+- "add {flow_name} flow to {connector_name} using grace/rulesbook/codegen-rust/.gracerules_add_flow"
+- "add {flow1} and {flow2} flows to {connector_name} using grace/rulesbook/codegen-rust/.gracerules_add_flow"
 
 **Examples:**
 ```bash
-add Refund flow to Stripe using grace/rulesbook/codegen/.gracerules_add_flow
-add Refund and RSync flows to Stripe using grace/rulesbook/codegen/.gracerules_add_flow
-add Capture, Refund, and Void flows to MyConnector using grace/rulesbook/codegen/.gracerules_add_flow
+add Refund flow to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_flow
+add Refund and RSync flows to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_flow
+add Capture, Refund, and Void flows to MyConnector using grace/rulesbook/codegen-rust/.gracerules_add_flow
 ```
 
 ## FLOW DEPENDENCIES
@@ -338,7 +338,7 @@ You are the Prerequisite Validation Subagent. Your job is to ensure all prerequi
 
 #### STEP 1: Validate Tech Spec
 ```bash
-# Read tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+# Read tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 # Extract flow-specific requirements for requested flows
 # Identify API endpoints, request/response formats
 ```
@@ -368,7 +368,7 @@ You are a Flow Implementation Subagent responsible for implementing ONE specific
 
 #### STEP 1: Read Tech Spec
 ```bash
-# Read complete tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+# Read complete tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 # Extract flow-specific requirements
 # Identify supported payment methods for this flow
 # Note any flow-specific API endpoints or behaviors

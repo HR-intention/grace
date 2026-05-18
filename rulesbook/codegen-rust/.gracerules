@@ -66,13 +66,13 @@ The reason for this design:
 ## WORKFLOW OVERVIEW
 
 This workflow is designed for NEW CONNECTOR INTEGRATIONS ONLY where:
-- User has placed tech spec in grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+- User has placed tech spec in grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 - Goal is complete UCS connector implementation following deterministic steps
 
 ## MANDATORY EXECUTION SEQUENCE
 
 ### PHASE 1: TECH SPEC VALIDATION
-1. **MANDATORY**: Read tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+1. **MANDATORY**: Read tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 2. **MANDATORY**: Validate tech spec completeness and UCS compatibility
 3. **MANDATORY**: Extract all connector requirements and supported features
 4. **MANDATORY**: Stop for user-approval if any gaps or issues found during validation
@@ -128,7 +128,7 @@ Execute flows in EXACT sequence - each must complete before next begins.
 5. **MANDATORY**: Generate completion report
 
 ## WORKFLOW INITIATION COMMAND
-When user requests: "integrate {ConnectorName} using grace/rulesbook/codegen/.gracerules"
+When user requests: "integrate {ConnectorName} using grace/rulesbook/codegen-rust/.gracerules"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🚨 REMINDER: YOU ARE THE CONTROLLER - DELEGATE EVERYTHING TO SUBAGENTS 🚨
@@ -159,7 +159,7 @@ When user requests: "integrate {ConnectorName} using grace/rulesbook/codegen/.gr
 Execute this workflow:
 
 ```
-STEP 1: Read tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+STEP 1: Read tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 STEP 2: Launch Foundation Setup Subagent
 STEP 2.5: Read macro pattern reference guides (macro_patterns_reference.md, flow_macro_guide.md, macro_templates.md)
 STEP 3: Upon Foundation completion and macro study, launch Flow Subagents sequentially
@@ -185,7 +185,7 @@ You are the Foundation Setup Subagent. Your ONLY responsibility is to establish 
 
 #### STEP 2: Tech Spec Analysis
 ```bash
-# Read tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+# Read tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 # Extract connector_name and base_url
 # Validate tech spec completeness
 ```
@@ -242,7 +242,7 @@ You are a Flow Implementation Subagent responsible for implementing ONE specific
 
 #### STEP 1: Read Tech Spec
 ```bash
-# Read complete tech spec from grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+# Read complete tech spec from grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 # Extract flow-specific requirements
 # Identify supported payment methods for this flow
 # Note any flow-specific API endpoints or behaviors
@@ -1212,7 +1212,7 @@ Before finalizing any request/response struct, verify:
 ## VALIDATION GATES (MANDATORY CHECKPOINTS)
 
 ### GATE 1: TECH SPEC VALIDATION
-- ✅ Tech spec file exists in grace/rulesbook/codegen/references/{connector_name}/technical_specification.md
+- ✅ Tech spec file exists in grace/rulesbook/codegen-rust/references/{connector_name}/technical_specification.md
 - ✅ Tech spec contains connector name and base URL
 - ✅ Tech spec lists supported payment methods
 - ✅ Tech spec defines required flows
@@ -1360,7 +1360,7 @@ If you use a forbidden tool directly:
 
 ## SAMPLE EXECUTION SEQUENCE
 
-When user executes: "integrate {ConnectorName} using grace/rulesbook/codegen/.gracerules"
+When user executes: "integrate {ConnectorName} using grace/rulesbook/codegen-rust/.gracerules"
 
 ### EXPECTED EXECUTION:
 ```
@@ -1463,8 +1463,8 @@ Developer fixes critical issues...
 # ============================================================================
 
 This workflow activates when the user provides a command matching this pattern:
-- "integrate {ConnectorName} using grace/rulesbook/codegen/.gracerules"
-- "integrate {ConnectorName} connector using grace/rulesbook/codegen/.gracerules"
+- "integrate {ConnectorName} using grace/rulesbook/codegen-rust/.gracerules"
+- "integrate {ConnectorName} connector using grace/rulesbook/codegen-rust/.gracerules"
 
 ## ACTIVATION CHECKLIST (Model-Independent)
 
