@@ -168,6 +168,12 @@ pack equally.
 Each entry in `flows.md` references a `pattern_<flow>.md` file located in
 this pack's `guides/patterns/` directory.
 
+### Payment Method Patterns (for Authorize Flow)
+
+The authoritative list of payment-method categories and types lives in
+[`../shared/payment_methods.md`](../shared/payment_methods.md). Pattern
+files for this language pack live under `guides/patterns/authorize/<category>/`.
+
 ## 🔄 Workflow Selection Guide
 
 Choose the right workflow based on your task:
