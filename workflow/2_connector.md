@@ -1,6 +1,6 @@
 # Connector Agent
 
-You are the **sole owner** of implementing **{FLOW}** for **{CONNECTOR}**. You handle everything end-to-end: links discovery, tech spec generation, codegen, build, grpcurl testing, and committing. Nothing happens for this connector outside of you.
+You are the **sole owner** of implementing **{FLOW}** for **{CONNECTOR}** in **{LANG}**. You handle everything end-to-end: links discovery, tech spec generation, codegen, build, smoke testing (grpcurl for Rust, integration pytest for Python — see the Language config in `workflow/2.3_codegen.md`), and committing. Nothing happens for this connector outside of you.
 
 **First**: Read this file (`grace/workflow/2_connector.md`) fully to understand all phases and rules before proceeding.
 
@@ -9,7 +9,7 @@ You coordinate by **spawning subagents via the Task tool** for heavy work (links
 **HARD GUARDRAIL — MANDATORY SUBAGENT DELEGATION**: You MUST use the Task tool to spawn separate subagents for Phases 1, 2, 4, and 5. Do NOT read the subagent workflow files (`2.1_links.md`, `2.2_techspec.md`, `2.3_codegen.md`, `2.4_pr.md`) yourself — each subagent reads its own file. You are FORBIDDEN from doing the following yourself:
 - **Phase 1 (Links)**: Do NOT use WebFetch to search for documentation URLs. Do NOT browse connector websites. Do NOT write to `integration-source-links.json`. ONLY spawn the Links Agent (`2.1_links.md`) via Task tool.
 - **Phase 2 (Tech Spec)**: Do NOT read `integration-source-links.json` to extract URLs. Do NOT create URL files. Do NOT run `grace techspec`. Do NOT activate the virtualenv. ONLY spawn the Tech Spec Agent (`2.2_techspec.md`) via Task tool.
-- **Phase 4 (Codegen)**: Do NOT read pattern guides or tech specs for implementation. Do NOT write connector code. Do NOT run `cargo build`. Do NOT run `grpcurl`. ONLY spawn the Code Generation Agent (`2.3_codegen.md`) via Task tool.
+- **Phase 4 (Codegen)**: Do NOT read pattern guides or tech specs for implementation. Do NOT write connector code. Do NOT run the build command (Rust `cargo build`, Python `uv run mypy ...`). Do NOT run the smoke test (Rust `grpcurl`, Python integration `pytest`). ONLY spawn the Code Generation Agent (`2.3_codegen.md`) via Task tool.
 - **Phase 5 (Commit & PR)**: Do NOT run `git add`, `git commit`, `git cherry-pick`, `git push`, or `gh pr create`. Do NOT stage files or create branches. ONLY spawn the PR Agent (`2.4_pr.md`) via Task tool. The PR Agent handles ALL git commit, cherry-pick, push, and PR creation work.
 
 **If you catch yourself about to do any of the above directly, STOP — you are violating the architecture. Spawn the correct subagent instead.**
@@ -86,8 +86,12 @@ Variables:
 
 ### 3a: Verify directory and branch
 
+Verify you are at the target service repo root (per the Language config in `workflow/2.3_codegen.md`).
+
 ```bash
-pwd && ls Cargo.toml backend/ Makefile     # verify directory
+pwd                                         # verify directory
+# Rust:    ls Cargo.toml backend/ Makefile
+# Python:  ls pyproject.toml connector_service/ uv.lock
 git status                                  # verify on {BRANCH} branch
 ```
 
@@ -95,12 +99,12 @@ If not on `{BRANCH}`, something is wrong — do NOT create a new branch, report 
 
 ### 3b: Find the tech spec
 
-**Important**: All searches must run from the repo root (where `Cargo.toml` is). Verify with `pwd` if unsure. Do NOT skip this search — actually run it.
+**Important**: All searches must run from the target service repo root (per the Language config in `workflow/2.3_codegen.md` — Rust: where `Cargo.toml` is; Python: where `pyproject.toml` is). Verify with `pwd` if unsure. Do NOT skip this search — actually run it.
 
-Glob search the entire references directory (case-insensitive, specs may be in subdirectories):
+Glob search the entire rulesbook references directory (case-insensitive, lang-agnostic — searches both `codegen-rust/references/` and `codegen-python/references/`; specs may be in subdirectories):
 
 ```bash
-find grace/rulesbook/codegen-rust/references -iname "*{connector}*{flow}*" -o -iname "*{connector}*" | head -20
+find grace/rulesbook -path "*/references/*" \( -iname "*{connector}*{flow}*" -o -iname "*{connector}*" \) | head -20
 ```
 
 If no results, also try with underscores/hyphens (e.g., `wells_fargo` vs `wellsfargo`). If still nothing -> report SKIPPED, go to Phase 6.
@@ -109,8 +113,11 @@ Note: Specs may be in a flat `specs/` folder (e.g., `specs/adyen_bank_debit.md`)
 
 ### 3c: Find connector source files
 
+Use the commit glob from the Language config in `workflow/2.3_codegen.md` to locate existing connector source files:
+
 ```
-Search: backend/connector-integration/src/connectors/*{connector}*
+# Rust:    Search: backend/connector-integration/src/connectors/*{connector}*
+# Python:  Search: connector_service/connectors/*{connector}*
 ```
 
 Note the actual name (e.g., `wells_fargo` vs `wellsfargo`). If not found -> report SKIPPED, go to Phase 6.
@@ -121,9 +128,9 @@ Store `{TECHSPEC_PATH}` and `{CONNECTOR_SOURCE_FILES}` for the next phase.
 
 ## Phase 4: Code Generation (SPAWN SUBAGENT)
 
-**GUARDRAIL: You MUST spawn a subagent. Do NOT read pattern guides, write Rust code, run `cargo build`, or run `grpcurl` yourself. Violation = broken architecture.**
+**GUARDRAIL: You MUST spawn a subagent. Do NOT read pattern guides, write connector code (Rust or Python), run the build command, or run the smoke test yourself. Violation = broken architecture.**
 
-You MUST use the **Task tool** to spawn a **Code Generation Agent**. Do NOT read pattern guides, write implementation code, run cargo build, or run grpcurl yourself. Do NOT read the workflow file yourself — the subagent reads it on its own.
+You MUST use the **Task tool** to spawn a **Code Generation Agent**. Do NOT read pattern guides, write implementation code, run the build command (Rust `cargo build`, Python `uv run mypy ...`), or run the smoke test (Rust `grpcurl`, Python integration `pytest`) yourself. Do NOT read the workflow file yourself — the subagent reads it on its own.
 
 **Spawn a Task with these parameters:**
 ```
@@ -146,7 +153,7 @@ Variables:
 Store the codegen result:
 - `{CODEGEN_STATUS}` = `SUCCESS` or `FAILED`
 - `{CODEGEN_FAILURE_REASON}` = reason string (empty if SUCCESS)
-- `{CODEGEN_GRPCURL_OUTPUT}` = full grpcurl output (may be partial/error output for FAILED)
+- `{CODEGEN_GRPCURL_OUTPUT}` = full smoke-test output (Rust: grpcurl output; Python: integration pytest output; may be partial/error output for FAILED)
 
 ---
 
@@ -154,7 +161,7 @@ Store the codegen result:
 
 **GUARDRAIL: You MUST spawn a subagent. Do NOT run `git add`, `git commit`, `git cherry-pick`, `git push`, or `gh pr create` yourself. Violation = broken architecture.**
 
-**This phase runs for BOTH successful and failed connectors.** The PR Agent handles everything: committing on the dev branch, cherry-picking to a clean PR branch, credential scrubbing, pushing, and creating the PR. The only case where you skip this phase is if codegen produced no file changes at all (check `git status -- backend/connector-integration/src/connectors/{connector}*`).
+**This phase runs for BOTH successful and failed connectors.** The PR Agent handles everything: committing on the dev branch, cherry-picking to a clean PR branch, credential scrubbing, pushing, and creating the PR. The only case where you skip this phase is if codegen produced no file changes at all — check `git status` using the commit glob from the Language config in `workflow/2.3_codegen.md` (Rust: `git status -- backend/connector-integration/src/connectors/{connector}*`; Python: `git status -- connector_service/connectors/{connector}*`).
 
 You MUST use the **Task tool** to spawn a **PR Agent**. Do NOT read the workflow file yourself — the subagent reads it on its own.
 
@@ -172,7 +179,7 @@ Variables:
   DEV_BRANCH: <the shared dev branch>
   CONNECTOR_STATUS: <SUCCESS or FAILED>
   FAILURE_REASON: <reason string, empty if SUCCESS>
-  GRPCURL_OUTPUT: <the full grpcurl test output from the Codegen Agent, raw text>
+  GRPCURL_OUTPUT: <the full smoke-test output from the Codegen Agent (Rust: grpcurl; Python: integration pytest), raw text>
   CONNECTOR_SOURCE_FILES: <paths to connector source files from Phase 3>"
 )
 ```
@@ -207,7 +214,7 @@ REASON: <if not SUCCESS, explain why>
 ```
 
 **STATUS definitions (strict):**
-- **SUCCESS**: Build passed AND grpcurl Authorize passed AND code was committed AND PR was created. All must be true. No exceptions.
+- **SUCCESS**: Build passed AND smoke-test Authorize passed (Rust: grpcurl; Python: integration pytest) AND code was committed AND PR was created. All must be true. No exceptions.
 - **FAILED**: Any phase failed after attempting it (build errors, test errors, service won't start, credentials rejected, PR creation failed, etc.)
 - **SKIPPED**: Connector was skipped before implementation (no tech spec found, no source files, already implemented, no credentials)
 
@@ -219,5 +226,5 @@ REASON: <if not SUCCESS, explain why>
 |-------|------|---------|
 | Links Agent | `2.1_links.md` | Find and verify backend API documentation links |
 | Tech Spec Agent | `2.2_techspec.md` | Generate tech spec via grace CLI |
-| Code Generation Agent | `2.3_codegen.md` | Read, analyze, implement, build, and grpcurl test |
+| Code Generation Agent | `2.3_codegen.md` | Read, analyze, implement, build, and smoke test (grpcurl for Rust, integration pytest for Python) |
 | PR Agent | `2.4_pr.md` | Commit on dev branch, cherry-pick to clean branch, scrub creds, create PR in juspay/connector-service |
