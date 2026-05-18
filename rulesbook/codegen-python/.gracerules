@@ -1,0 +1,75 @@
+# GRACE Python Codegen — New Connector Integration
+
+You are integrating a new payment connector into `connector-service-python` (sibling of `grace/`). Your output is Python source code in `connector_service/connectors/<connector>/` plus a wiring update in `connector_service/connectors/__init__.py`.
+
+## Inputs
+
+| Variable | Description |
+|---|---|
+| `{Connector}` | Connector name in canonical casing (e.g., `Razorpay`) |
+| `{connector}` | Same, lowercase (e.g., `razorpay`) — used in filenames and registry keys |
+| `{base_url}` | PSP base URL (e.g., `https://api.razorpay.com/v1`) |
+| `{tech_spec_path}` | Absolute or repo-relative path to the tech spec (typically `grace/rulesbook/references/{connector}/technical_specification.md`) |
+
+## Hard rules
+
+1. **Target shell:** `connector-service-python/connector_service/`. Work from that repo's root.
+2. **No HTTP without async.** Every flow method is `async def` and uses `self.client` (an `httpx.AsyncClient`).
+3. **No floats on money.** Use `Amount(minor_units=int, currency=Currency.X)`.
+4. **No print().** Use the structlog logger; the `@connector_flow` decorator already emits standard fields.
+5. **No raw secrets in logs.** PCI/PII fields (`card_number`, `cvv`, `vpa`) are auto-masked if the field name matches the masking processor; pass them through as field names, not concatenated strings.
+6. **Pydantic strict.** Every connector-specific model uses `model_config = ConfigDict(extra="forbid")` so unknown PSP response fields fail fast.
+7. **No mocked tests against the connector.** Integration tests hit a running uvicorn process via `httpx.AsyncClient`; mypy and `pytest --collect-only` are the build gate.
+
+## Phases
+
+### Phase 0: Read the tech spec
+Read `{tech_spec_path}` end-to-end. Note the base URL, authentication scheme, supported flows, endpoint paths, request/response shapes, error codes, status mappings, idempotency convention, and webhook signature scheme.
+
+### Phase 1: Scaffold the connector package
+
+Create:
+- `connector_service/connectors/{connector}/__init__.py` — calls `register_connector("{connector}", {Connector})`
+- `connector_service/connectors/{connector}/connector.py` — `{Connector}(BaseConnector)` class with all 7 flow methods stubbed
+- `connector_service/connectors/{connector}/transformers.py` — PSP-specific request/response Pydantic models + `to_*_request` / `from_*_response` transformer functions
+- `connector_service/connectors/{connector}/auth.py` — `{Connector}Auth(BaseAuth)` with any extra credential fields the PSP needs
+
+Append `from . import {connector}` to `connector_service/connectors/__init__.py` (the explicit-discovery convention from Plan C).
+
+Wire the credential entry into `creds.json` under the connector name (use sandbox/test keys).
+
+### Phase 2: Implement each flow
+
+For each of the 7 flows (Authorize, PSync, Capture, Refund, RSync, Void, IncomingWebhook):
+1. Read the corresponding pattern file in `guides/patterns/pattern_<flow>.md`.
+2. Read the relevant payment-method pattern(s) under `guides/patterns/authorize/<category>/` (Authorize only).
+3. Apply the pattern, substituting placeholders for this connector's specifics from the tech spec.
+4. Run `uv run mypy connector_service/connectors/{connector}/` — must be clean.
+5. Run `uv run pytest tests/integration/test_{connector}.py --collect-only` if you've authored that test file; if not yet authored, defer to Phase 4.
+
+### Phase 3: Status mapping
+
+Implement the connector's `_map_status` helpers (typically one per flow result type). Every PSP status documented in the tech spec must map to a `AttemptStatus` or `RefundStatus`. Unmapped statuses are a critical quality issue.
+
+### Phase 4: Integration tests
+
+Author `connector-service-python/tests/integration/test_{connector}.py` with:
+- A fixture spinning up the FastAPI app + an `httpx.AsyncClient`.
+- `test_authorize` — POSTs to `/v1/payments/authorize` with a sample request from the tech spec, asserts status code and decoded response shape.
+- `test_psync`, `test_capture`, `test_refund`, `test_rsync`, `test_void` — analogous.
+- `test_incoming_webhook` — POSTs to `/v1/webhooks/{connector}` with a sample payload (incl. signature header) and asserts `WebhookAck`.
+
+Tests require valid `creds.json` for sandbox calls. Mark as `@pytest.mark.integration` so they can be skipped in CI without credentials.
+
+### Phase 5: Quality review
+
+Walk through the checks in `guides/quality/python_quality_checks.md` and the cross-cutting checks in `../shared/quality_rubric.md`. The score must be ≥ 60.
+
+Log lessons to `../shared/feedback.md` with the `[lang:python]` tag.
+
+## Supporting references
+
+- Type system: [`guides/types/types.md`](guides/types/types.md)
+- Pattern files: [`guides/patterns/`](guides/patterns/)
+- Quality checks: [`guides/quality/python_quality_checks.md`](guides/quality/python_quality_checks.md)
+- Shared content: [`../shared/`](../shared/)

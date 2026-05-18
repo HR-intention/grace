@@ -1,0 +1,11 @@
+# GRACE Python Codegen — Add Payment Method (Wave 2 stub)
+
+Wave 2 work — not yet implemented in detail. For Wave 1, use the main
+`.gracerules` entrypoint. When fully authored, this file will mirror
+`../codegen-rust/.gracerules_add_payment_method` syntax for adding
+specific payment methods (e.g., `add UPI:Collect,Intent to Razorpay`).
+
+Until then, to add a payment method:
+1. Read the relevant pattern in `guides/patterns/authorize/<category>/`.
+2. Extend the connector's existing `authorize` method body to handle the new payment-method variant.
+3. Add transformer code and types in `transformers.py`.

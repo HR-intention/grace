@@ -1,0 +1,11 @@
+# GRACE Python Codegen — Add Flow (Wave 2 stub)
+
+Wave 2 work — not yet implemented in detail. For Wave 1, use the main
+`.gracerules` entrypoint and implement all 7 flows from scratch. When this
+file is fully authored, it will support incremental flow addition to an
+existing Python connector (mirroring `../codegen-rust/.gracerules_add_flow`).
+
+Until then, if you need to add a single flow:
+1. Open `.gracerules` and consult Phase 2 for the relevant flow.
+2. Apply the matching pattern from `guides/patterns/`.
+3. Skip the scaffolding steps (Phase 1) — they're already done for an existing connector.
