@@ -22,7 +22,7 @@ grace techspec <connector-name> -f /path/to/api-docs -v
 grace techspec <connector-name> -e
 ```
 
-Output: `rulesbook/codegen/references/specs/<connector-name>.md`
+Output: `rulesbook/codegen-rust/references/specs/<connector-name>.md`
 
 ### 2. Run Code Generation
 
@@ -31,7 +31,7 @@ Go back to the connector-service root folder (not `grace/`).
 Open `connector-service/` in your AI coding agent and run:
 
 ```
-integrate <ConnectorName> using grace/rulesbook/codegen/.gracerules
+integrate <ConnectorName> using grace/rulesbook/codegen-rust/.gracerules
 ```
 
 The AI agent will run through these phases:
@@ -54,12 +54,12 @@ cargo build
 
 Add a missing flow:
 ```
-add Refund flow to <Connector> using grace/rulesbook/codegen/.gracerules_add_flow
+add Refund flow to <Connector> using grace/rulesbook/codegen-rust/.gracerules_add_flow
 ```
 
 Add payment methods:
 ```
-add Wallet:Apple Pay,Google Pay and Card:Credit,Debit to <Connector> using grace/rulesbook/codegen/.gracerules_add_payment_method
+add Wallet:Apple Pay,Google Pay and Card:Credit,Debit to <Connector> using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
 ```
 
 ---

@@ -105,7 +105,7 @@ grace techspec myconnector -e
 
 Replace `myconnector` with the actual name (e.g. `stripe`, `adyen`).
 
-**Output:** `rulesbook/codegen/references/specs/myconnector.md`
+**Output:** `rulesbook/codegen-rust/references/specs/myconnector.md`
 
 ---
 
@@ -116,7 +116,7 @@ Replace `myconnector` with the actual name (e.g. `stripe`, `adyen`).
 Open `connector-service/` in your AI coding agent (Cursor / Claude Code / Windsurf) and tell it:
 
 ```
-integrate MyConnector using grace/rulesbook/codegen/.gracerules
+integrate MyConnector using grace/rulesbook/codegen-rust/.gracerules
 ```
 
 The AI agent will automatically run through these phases:
@@ -151,17 +151,17 @@ No errors = your connector is ready!
 ### Add a missing flow
 
 ```
-add Refund flow to Stripe using grace/rulesbook/codegen/.gracerules_add_flow
+add Refund flow to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_flow
 ```
 
 ### Add multiple flows
 
 ```
-add SetupMandate and RepeatPayment flows to Stripe using grace/rulesbook/codegen/.gracerules_add_flow
+add SetupMandate and RepeatPayment flows to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_flow
 ```
 
 ### Add payment methods (Category:Type syntax)
 
 ```
-add Wallet:Apple Pay,Google Pay and Card:Credit,Debit to Stripe using grace/rulesbook/codegen/.gracerules_add_payment_method
+add Wallet:Apple Pay,Google Pay and Card:Credit,Debit to Stripe using grace/rulesbook/codegen-rust/.gracerules_add_payment_method
 ```

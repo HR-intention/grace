@@ -97,7 +97,7 @@ If not on `{BRANCH}`, something is wrong — do NOT create a new branch, report 
 Glob search the entire references directory (case-insensitive, specs may be in subdirectories):
 
 ```bash
-find grace/rulesbook/codegen/references -iname "*{connector}*{flow}*" -o -iname "*{connector}*" | head -20
+find grace/rulesbook/codegen-rust/references -iname "*{connector}*{flow}*" -o -iname "*{connector}*" | head -20
 ```
 
 If no results, also try with underscores/hyphens (e.g., `wells_fargo` vs `wellsfargo`). If still nothing -> report SKIPPED, go to Phase 6.

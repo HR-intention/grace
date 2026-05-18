@@ -7,7 +7,7 @@ There are **three distinct things** in this repo. Do not confuse them:
 | Component | What it is | Lives in |
 |---|---|---|
 | **Python CLI** (`grace`) | Generates `technical_specification.md` from API docs (URLs or PDFs) via a LangGraph workflow | `src/`, `main.py`, `pyproject.toml` |
-| **Rulesbook** (`.gracerules*`) | Markdown rules and pattern templates that an external AI agent reads when implementing the Rust connector | `rulesbook/codegen/` |
+| **Rulesbook** (`.gracerules*`) | Markdown rules and pattern templates that an external AI agent reads when implementing the Rust connector | `rulesbook/codegen-rust/` |
 | **Workflow agents** | Markdown prompts for multi-connector batch orchestration | `workflow/` |
 
 The Rust connector code itself is **NOT in this repo** — it's generated into `connector-service/backend/connector-integration/src/connectors/` by an AI agent that the user invokes with one of the `.gracerules*` files.
@@ -31,7 +31,7 @@ grace/
 │   │                                 #   [mock_server] → output
 │   ├── utils/                        # PDF/DOCX extraction, validation
 │   └── types/config.py               # AIConfig, TechSpecConfig, ClaudeAgentConfig
-├── rulesbook/codegen/                # The rules the AI agent follows to write Rust
+├── rulesbook/codegen-rust/                # The rules the AI agent follows to write Rust
 │   ├── .gracerules                   # NEW connector from scratch (all 6 core flows)
 │   ├── .gracerules_add_flow          # Add one flow to an existing connector
 │   ├── .gracerules_add_payment_method# Add payment methods to an existing connector
@@ -87,14 +87,14 @@ grace techspec stripe -f /path/to/docs -e -v
 grace techspec stripe -f /path/to/docs -m
 ```
 
-Output goes to `rulesbook/codegen/references/<connector>/technical_specification.md` (or the path in `TECHSPEC_OUTPUT_DIR`).
+Output goes to `rulesbook/codegen-rust/references/<connector>/technical_specification.md` (or the path in `TECHSPEC_OUTPUT_DIR`).
 
 ### Generate the Rust connector
 
 After producing the tech spec, switch to the **`connector-service/` repo** and tell your AI coding agent:
 
 ```
-integrate Stripe using grace/rulesbook/codegen/.gracerules
+integrate Stripe using grace/rulesbook/codegen-rust/.gracerules
 ```
 
 (Or `.gracerules_add_flow` / `.gracerules_add_payment_method` for incremental work.) The AI agent reads the rulesbook, implements the connector in Rust, and verifies with `cargo build`.
@@ -143,11 +143,11 @@ Three entrypoints, invoked in plain English commands:
 
 | File | Command form | Used for |
 |---|---|---|
-| `.gracerules` | `integrate <Connector> using grace/rulesbook/codegen/.gracerules` | New connector from scratch — implements 6 core flows (Authorize, PSync, Capture, Refund, RSync, Void) |
-| `.gracerules_add_flow` | `add <Flow> flow to <Connector> using grace/rulesbook/codegen/.gracerules_add_flow` | Add one or more flows incrementally |
-| `.gracerules_add_payment_method` | `add <Category>:<PM1>,<PM2> to <Connector> using grace/rulesbook/codegen/.gracerules_add_payment_method` | Add payment methods (e.g., `Wallet:Apple Pay,Google Pay`) |
+| `.gracerules` | `integrate <Connector> using grace/rulesbook/codegen-rust/.gracerules` | New connector from scratch — implements 6 core flows (Authorize, PSync, Capture, Refund, RSync, Void) |
+| `.gracerules_add_flow` | `add <Flow> flow to <Connector> using grace/rulesbook/codegen-rust/.gracerules_add_flow` | Add one or more flows incrementally |
+| `.gracerules_add_payment_method` | `add <Category>:<PM1>,<PM2> to <Connector> using grace/rulesbook/codegen-rust/.gracerules_add_payment_method` | Add payment methods (e.g., `Wallet:Apple Pay,Google Pay`) |
 
-**Supported flows**: Authorize, Capture, Refund, Void, PSync, RSync, SetupMandate, RepeatPayment, IncomingWebhook, CreateOrder, SessionToken, PaymentMethodToken, DefendDispute, AcceptDispute, DSync, MandateRevoke, IncrementalAuthorization, VoidPC. One pattern file per flow under `rulesbook/codegen/guides/patterns/`.
+**Supported flows**: Authorize, Capture, Refund, Void, PSync, RSync, SetupMandate, RepeatPayment, IncomingWebhook, CreateOrder, SessionToken, PaymentMethodToken, DefendDispute, AcceptDispute, DSync, MandateRevoke, IncrementalAuthorization, VoidPC. One pattern file per flow under `rulesbook/codegen-rust/guides/patterns/`.
 
 **Supported payment-method categories**: Card, Wallet, BankTransfer, BankDebit, BankRedirect, UPI, BNPL, Crypto, GiftCard, MobilePayment, Reward.
 
@@ -223,13 +223,13 @@ See [.env.example](.env.example). Loaded from (in precedence order, see [src/con
 ## Conventions & gotchas
 
 1. **`enhacer.md` (with trailing space) is intentionally that filename** — it's referenced by string and shipped in the repo. Do not "fix" it without also updating the references.
-2. **`rulesbook/codegen/references/**` is gitignored.** Generated tech specs are local artifacts. Don't commit them.
+2. **`rulesbook/codegen-rust/references/**` is gitignored.** Generated tech specs are local artifacts. Don't commit them.
 3. **The CLI is invoked from `grace/` with `.venv` activated.** Workflow agents that call it always `source .venv/bin/activate` first — preserve this when editing them.
 4. **One subcommand only**: `grace techspec`. The README's "Other Commands" section refers to AI-agent prompt commands (read by the rulesbook), not CLI subcommands.
 5. **Config is a singleton** ([src/config.py:117](src/config.py:117)). `get_config()` caches; use `reload_config()` to pick up env changes.
 6. **No URL scraping without `FIRECRAWL_API_KEY`** — missing key silently produces empty markdown files and the LLM analysis gets no input.
 7. **Connector-name casing matters**: workflow agents use original casing for `grace techspec` (`Adyen`) and lowercase for branches/paths (`adyen`).
-8. **Pattern files are mutable templates, not specs.** Adding a new flow means adding a `pattern_<flow>.md` under `rulesbook/codegen/guides/patterns/` and referencing it from the relevant `.gracerules*` file.
+8. **Pattern files are mutable templates, not specs.** Adding a new flow means adding a `pattern_<flow>.md` under `rulesbook/codegen-rust/guides/patterns/` and referencing it from the relevant `.gracerules*` file.
 9. **Don't run `cargo test`** when working in `connector-service` via these workflows — all testing is `grpcurl`-based by design.
 10. **The Quality Guardian's `feedback.md`** is append-only institutional memory. New review findings belong there; do not edit historical entries.
 
@@ -242,8 +242,8 @@ See [.env.example](.env.example). Loaded from (in precedence order, see [src/con
 | Adding a new CLI flag | [src/cli.py:29](src/cli.py:29) → thread through to `run_techspec_workflow` |
 | Adding a new pipeline stage | [src/workflows/techspec/workflow.py](src/workflows/techspec/workflow.py) + new file in `nodes/` + extend `TechspecWorkflowState` |
 | Tuning the spec prompt | [src/ai/prompts/](src/ai/prompts/) (loaded by [src/ai/system/prompt_config.py](src/ai/system/prompt_config.py)) |
-| Adding a new flow pattern | Create `rulesbook/codegen/guides/patterns/pattern_<flow>.md`, reference it from `.gracerules*` |
-| Adding a new payment-method pattern | Create `rulesbook/codegen/guides/patterns/authorize/<pm>/pattern_authorize_<pm>.md` |
+| Adding a new flow pattern | Create `rulesbook/codegen-rust/guides/patterns/pattern_<flow>.md`, reference it from `.gracerules*` |
+| Adding a new payment-method pattern | Create `rulesbook/codegen-rust/guides/patterns/authorize/<pm>/pattern_authorize_<pm>.md` |
 | Debugging a failing connector run | Check `grace.log`, then re-run with `-v`. Inspect `state["errors"]` accumulation in the relevant node |
 | Tweaking batch orchestration | `workflow/1_orchestrator.md` (top-level) or `workflow/2_*.md` (per-connector subagents) |
 
