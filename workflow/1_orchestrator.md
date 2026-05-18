@@ -12,6 +12,7 @@ You do not invoke link agent or techspec agent or codegen agent you only invoke 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `{FLOW}` | The payment flow to implement | `BankDebit`, `MIT`, `Wallet`, `PayLater` |
+| `{LANG}` | Target language for codegen (`rust` or `python`) | `python` |
 | `{CONNECTORS_FILE}` | JSON file with connector names (simple array) | `connectors.json` |
 | `{BRANCH}` | Git branch name for all work | `feat/mit` |
 
@@ -107,7 +108,8 @@ Variables:
   CONNECTOR: <connector name, exact casing from JSON>
   FLOW: <the payment flow>
   CONNECTORS_FILE: <path to the connectors JSON file>
-  BRANCH: <the branch name>"
+  BRANCH: <the branch name>
+  LANG: <target language: rust or python>"
 )
 ```
 
