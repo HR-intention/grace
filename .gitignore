@@ -24,6 +24,7 @@ logs/
 npm-debug.log*
 
 output/
+docs/superpowers
 
 
 # rulesbook/codegen/references/specs/*
