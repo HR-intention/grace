@@ -73,3 +73,4 @@ Log lessons to `../shared/feedback.md` with the `[lang:python]` tag.
 - Pattern files: [`guides/patterns/`](guides/patterns/)
 - Quality checks: [`guides/quality/python_quality_checks.md`](guides/quality/python_quality_checks.md)
 - Shared content: [`../shared/`](../shared/)
+- **Canonical code-gen prompt:** [`../../src/ai/prompts/macro_code_generation_prompt.md`](../../src/ai/prompts/macro_code_generation_prompt.md) — see **Track B: Python (connector-service-python)** for the end-to-end template covering all 4 package files (`__init__.py`, `auth.py`, `connector.py`, `transformers.py`), per-PM dispatch, status-mapping helpers, webhook signing, and Python validation rules

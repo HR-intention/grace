@@ -95,6 +95,7 @@ This workflow is designed for NEW CONNECTOR INTEGRATIONS ONLY where:
    - Read: guides/patterns/macro_patterns_reference.md
    - Read: guides/patterns/flow_macro_guide.md
    - Read: template-generation/macro_templates.md
+   - Read: ../../src/ai/prompts/macro_code_generation_prompt.md (**Track A: Rust (UCS)** section) — canonical end-to-end code-generation prompt with full file-header/imports, `create_all_prerequisites!` / `macro_connector_implementation!` templates, transformer skeletons, flow-type mapping table, and validation rules
 2. **UNDERSTAND**: Key concepts for implementation
    - How to use create_all_prerequisites! macro
    - How to use macro_connector_implementation! macro
