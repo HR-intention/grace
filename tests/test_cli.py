@@ -239,6 +239,37 @@ def test_docs_cli_writes_under_cwd(
     assert (fake_root / "docs-generated" / "connectors" / "demo.md").is_file()
 
 
+def test_skills_list_cli_prints_add_connector() -> None:
+    result = CliRunner().invoke(main, ["skills", "list"])
+    assert result.exit_code == 0, result.output
+    assert "add-connector" in result.output
+
+
+def test_skills_install_cli_writes_to_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["skills", "install"])
+    assert result.exit_code == 0, result.output
+    assert "add-connector" in result.output
+    assert (tmp_path / ".skills" / "add-connector" / "SKILL.md").is_file()
+
+
+def test_skills_install_cli_force_overrides_existing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    # First install — clean.
+    CliRunner().invoke(main, ["skills", "install"])
+    # Second install — should refuse without --force.
+    second = CliRunner().invoke(main, ["skills", "install"])
+    assert second.exit_code != 0
+    assert "force" in second.output.lower()
+    # Third install with --force succeeds.
+    third = CliRunner().invoke(main, ["skills", "install", "--force"])
+    assert third.exit_code == 0
+
+
 def test_docs_cli_errors_when_no_connectors(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

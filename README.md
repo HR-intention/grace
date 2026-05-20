@@ -181,9 +181,23 @@ grace doctor                                          # is Claude Code reachable
 grace fetch-docs <psp> --from <llms.txt-url-or-path>  # snapshot PSP docs
 grace generate   <psp> [--from <src>] [--output <dir>]
 grace regenerate <psp>
+grace docs                                            # rebuild docs-generated/llms.txt
+grace skills list                                     # list bundled .skills/ templates
+grace skills install [--force]                        # copy them into <cwd>/.skills/
 ```
 
 Run any command with `-h` for full options.
+
+## Bundled artifacts the consumer (Lens) commits
+
+After `grace generate <psp>` succeeds, three trees end up in the consumer repo and should all be committed together. Two are refreshed automatically; one is bootstrapped once.
+
+| Tree | Refreshed when | Purpose |
+|---|---|---|
+| `lens/connectors/<psp>/` | every `grace generate` | The runtime connector package. |
+| `connector_docs/<psp>/` | every `grace fetch-docs` | The PSP doc snapshot Grace consumed (pins the input for reproducibility). |
+| `docs-generated/llms.txt` + `docs-generated/connectors/<psp>.md` | every `grace generate` (auto) | Catalog for downstream AI agents — modeled on juspay-prism's pattern. |
+| `.skills/` | once, via `grace skills install` | Claude Code Skills the consumer uses for `add-connector` workflows. |
 
 ---
 

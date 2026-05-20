@@ -15,6 +15,7 @@ from grace.fetch_docs import fetch_docs
 from grace.pipeline import GenerationContext, PipelineHooks, run_pipeline
 from grace.pipeline.context import assemble_context
 from grace.pipeline.runner import ClaudeCodeRunner
+from grace.skills_install import install_skills, list_skills
 
 
 # Per-reason actionable hints surfaced to the user when a GraceError bubbles up
@@ -300,6 +301,50 @@ def docs() -> None:
         f"OK: wrote {len(result.files_written)} files under "
         f"{result.output_root} ({len(result.connectors)} connectors discovered)"
     )
+
+
+@main.group(name="skills")
+def skills_group() -> None:
+    """Manage the bundled Claude Code Skills pack for the consumer repo."""
+
+
+@skills_group.command(name="list")
+def skills_list_cmd() -> None:
+    """List every skill Grace ships."""
+    names = list_skills()
+    if not names:
+        click.echo("(no skills bundled)")
+        return
+    for n in names:
+        click.echo(n)
+
+
+@skills_group.command(name="install")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite any existing skill directories at the target.",
+)
+@click.option(
+    "--output",
+    "output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Target repo root. Defaults to current working directory.",
+)
+def skills_install_cmd(force: bool, output: Path | None) -> None:
+    """Copy bundled skills templates into <cwd>/.skills/ (or --output)."""
+    target = (output or Path.cwd()).resolve()
+    try:
+        result = install_skills(target_root=target, force=force)
+    except GraceError as e:
+        raise _click_error_from_grace(e) from e
+    click.echo(
+        f"OK: installed {len(result.skills_installed)} skill(s) "
+        f"({result.files_written} files) into {result.install_root}"
+    )
+    for s in result.skills_installed:
+        click.echo(f"  - {s}")
 
 
 @main.command()

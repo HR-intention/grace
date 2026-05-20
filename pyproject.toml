@@ -50,6 +50,9 @@ grace = "grace.cli:main"
 where = ["src"]
 include = ["grace*"]
 
+[tool.setuptools.package-data]
+grace = ["templates/*.j2", "skills_templates/**/*"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
