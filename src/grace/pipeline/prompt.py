@@ -149,18 +149,70 @@ reading the rulebook, then re-check against this list before you finish.
 
 Before you exit, grep your own output for these and verify each one matches:
 
-  $ grep -E "^class [A-Z][a-z]+\\(Connector\\)" connector.py        # exactly one match
-  $ grep "from lens.connector import Connector" connector.py         # present
-  $ grep "ConnectorFactory.register" __init__.py                      # present
-  $ grep "requires_lens" __init__.py                                  # present
-  $ grep -c "async def" connector.py                                  # >= 6 (5 flows + close)
-  $ grep -c "@property" connector.py                                  # >= 4 (name, base_url, supported_methods, supports_idempotency_key)
-  $ grep -E "def name|def base_url|def supported_methods|def supports_idempotency_key" connector.py  # 4 matches
-  $ grep "Maskable" auth.py                                           # at least once
-  $ grep "WEBHOOK_SIGNATURE_FAILED" connector.py                      # at least once
-  $ grep -E "Money|float\\(" connector.py models.py                   # ZERO matches
-  $ grep -E "psp_order_id|psp_refund_id|psp_payment_id" connector.py  # at least one of each
-  $ grep -E "\\border_id=|\\bconnector_order_id=|\\braw=" connector.py # ZERO (don't invent response fields)
+  STRUCTURE:
+    $ grep -E "^class [A-Z][a-z]+\\(Connector\\)" connector.py        # exactly one match
+    $ grep "from lens.connector import Connector" connector.py         # present
+    $ grep "ConnectorFactory.register" __init__.py                      # present
+    $ grep "requires_lens" __init__.py                                  # present
+    $ grep -c "async def" connector.py                                  # >= 6 (5 flows + close)
+    $ grep -c "@property" connector.py                                  # >= 4
+    $ grep -E "def name|def base_url|def supported_methods|def supports_idempotency_key" connector.py  # 4 matches
+
+  PII + ERRORS:
+    $ grep "Maskable" auth.py                                           # at least once
+    $ grep "WEBHOOK_SIGNATURE_FAILED" connector.py                      # at least once
+    $ grep -E "Money|float\\(" connector.py models.py                   # ZERO matches
+
+  LOCKED FIELD NAMES (every one of these has been gotten wrong by past
+  generations — verify ALL six lines in your own output before exiting):
+
+    $ grep -E "config\\.credentials|config\\.merchant_id" connector.py auth.py  # ZERO
+                            # ConnectorConfig has api_key/secret_key/webhook_secret;
+                            # merchant_id lives on requests, not config.
+
+    $ grep -E "\\bpayment_attempt=|\\brefund_event=" connector.py tests/*.py   # ZERO
+                            # WebhookEvent fields are `attempt` and `refund`.
+
+    $ grep -E "WebhookEvent\\(.*payment_attempt|WebhookEvent\\(.*refund_event" *.py  # ZERO
+
+    $ grep -E "\\.payment_attempt\\b|\\.refund_event\\b" tests/*.py             # ZERO
+                            # event.attempt / event.refund, never the longer names.
+
+    $ grep -E "RefundRequest\\(.*\\bamount=" connector.py tests/*.py            # ZERO
+                            # RefundRequest has amount_to_refund: int|None; no `amount` field.
+
+    $ grep -E "SyncRefundRequest\\(.*\\brefund_id=|SyncRefundRequest\\(.*\\bpsp_order_id=" \\
+        connector.py tests/*.py                                                  # ZERO
+                            # SyncRefundRequest takes only psp_refund_id + RequestCommon.
+
+    $ grep -E "RefundResponse\\(.*refunded_amount=Amount|SyncRefundResponse\\(.*refunded_amount=Amount" \\
+        connector.py                                                              # ZERO
+                            # refunded_amount is int (minor units), never Amount.
+
+    $ grep -E "SyncPaymentResponse\\(.*paid_amount=Amount" connector.py           # ZERO
+                            # paid_amount is int (minor units), never Amount.
+
+    $ grep -E "PaymentAttempt\\(.*attempted_at=None" connector.py                 # ZERO
+                            # attempted_at is required, non-optional.
+
+    $ grep -E "\\border_id=[^,)]" connector.py | grep -v "request\\.order_id"     # ZERO matches
+                            # No invented order_id= kwarg on responses; pass psp_order_id.
+
+    $ grep -E "CreateOrderResponse\\(.*payment_link=str|payment_link=str\\(" connector.py  # ZERO
+                            # payment_link is HttpUrl. Coerce via HttpUrl(s) or use a typed
+                            # Pydantic field that returns HttpUrl directly.
+
+  TEST FIXTURES:
+    $ grep -E "ConnectorConfig\\(.*credentials=|ConnectorConfig\\(.*merchant_id=" tests/*.py   # ZERO
+                            # ConnectorConfig takes name=, api_key=, secret_key=, webhook_secret=.
+
+    $ grep -E "(CreateOrderRequest|SyncPaymentRequest|RefundRequest|SyncRefundRequest)\\(" tests/*.py \\
+        | head -3                                                                 # must include merchant_id= and order_id=
+                            # Every request needs both RequestCommon fields supplied.
+
+  If ANY check above has a non-empty match (when it should be ZERO) or a
+  missing match (when it should be present), fix it before writing the
+  final file out.
 
 ╔══════════════════════════════════════════════════════════════════════╗
 ║ CONTEXT FILES                                                         ║

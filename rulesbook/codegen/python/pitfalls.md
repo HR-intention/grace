@@ -94,6 +94,204 @@ The locked `CreateOrderRequest` (and siblings) have a **flat** field set inherit
 
 If the PSP requires a customer email/phone/name and the domain request doesn't carry it, **pass a placeholder or omit the field** — do NOT invent additional request fields. Orbit owns the customer record.
 
+## 4a. Field-name reference (LOCKED — verify every kwarg against this table)
+
+Every single one of these has been gotten wrong in past generations. The Pydantic models are `extra="forbid"`, so any deviation crashes at construction time with `[call-arg]` or `[attr-defined]` mypy errors.
+
+### `ConnectorConfig` (`lens.factory`)
+
+```python
+class ConnectorConfig(BaseModel):
+    name: str
+    api_key: Maskable[str]
+    secret_key: Maskable[str] | None = None
+    webhook_secret: Maskable[str] | None = None
+    base_url_override: HttpUrl | None = None
+    additional: dict[str, Any] = Field(default_factory=dict)
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `config.credentials` (no such attribute) | `config.api_key.expose()` |
+| `config.merchant_id` (lives on request, not config) | `request.merchant_id` |
+| `ConnectorConfig(credentials=...)` | `ConnectorConfig(name="cashfree", api_key=Maskable("..."), secret_key=Maskable("..."))` |
+| `ConnectorConfig(merchant_id=...)` | merchant_id is **never** on ConnectorConfig. It comes from the request. |
+| `ConnectorConfig(client_id=..., client_secret=...)` | `api_key=Maskable(client_id), secret_key=Maskable(client_secret)` |
+
+### `RequestCommon` (the base of every request)
+
+```python
+class RequestCommon(BaseModel):
+    merchant_id: str            # REQUIRED
+    order_id: str               # REQUIRED — Orbit's UUID
+    customer_id: str | None = None
+    idempotency_key: str | None = None
+```
+
+Every concrete request inherits these four. **`merchant_id` and `order_id` are required** — tests that omit them fail with `Missing named argument` at mypy time and `ValidationError` at runtime.
+
+### `CreateOrderRequest`
+
+```python
+class CreateOrderRequest(RequestCommon):
+    amount: Amount
+    return_url: HttpUrl          # REQUIRED
+    allowed_methods: list[PaymentMethod] | None = None
+    expires_at: datetime | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `request.amount.value` | `request.amount.minor_units: int` |
+| `request.customer.email` | `request.customer_id: str \| None` (no nested customer) |
+| `CreateOrderRequest(amount=500, currency="INR")` | `CreateOrderRequest(amount=Amount(minor_units=500, currency=Currency.INR), ...)` |
+
+### `CreateOrderResponse`
+
+```python
+class CreateOrderResponse(BaseModel):
+    psp_order_id: str
+    payment_link: HttpUrl         # NOT str — coerce via HttpUrl(str_value)
+    status: OrderStatus
+    expires_at: datetime | None = None
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `CreateOrderResponse(order_id=...)` | `psp_order_id=...` |
+| `CreateOrderResponse(connector_order_id=...)` | `psp_order_id=...` |
+| `CreateOrderResponse(payment_link="https://...")` | `payment_link=HttpUrl("https://...")` (or use a typed Pydantic source) |
+| `CreateOrderResponse(raw={...})` | `raw` lives on `PaymentAttempt` and `raw_payload` on `WebhookEvent`, **nowhere else** |
+
+### `SyncPaymentRequest`
+
+```python
+class SyncPaymentRequest(RequestCommon):
+    psp_order_id: str
+```
+
+### `SyncPaymentResponse`
+
+```python
+class SyncPaymentResponse(BaseModel):
+    psp_order_id: str
+    status: OrderStatus
+    paid_amount: int | None = None     # MINOR UNITS, not Amount
+    attempts: list[PaymentAttempt] = Field(default_factory=list)
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `SyncPaymentResponse(paid_amount=Amount(...))` | `paid_amount=attempt.amount.minor_units` (an `int`) |
+| `SyncPaymentResponse(payment_attempts=[...])` | `attempts=[...]` |
+
+### `PaymentAttempt`
+
+```python
+class PaymentAttempt(BaseModel):
+    psp_payment_id: str
+    status: PaymentAttemptStatus
+    method_used: PaymentMethod | None = None
+    amount: Amount | None = None        # Amount here, but ONLY here
+    failure_code: PaymentFailureCode | None = None
+    failure_reason: str | None = None
+    attempted_at: datetime              # REQUIRED, non-optional
+    raw: dict[str, Any] = Field(default_factory=dict)
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `PaymentAttempt(attempted_at=psp_value or None)` | `attempted_at` is required — provide a real datetime, never None |
+| `PaymentAttempt(payment_method=...)` | `method_used=...` |
+| `PaymentAttempt(failure=...)` | `failure_code=PaymentFailureCode.X` + `failure_reason="..."` |
+
+### `RefundRequest`
+
+```python
+class RefundRequest(RequestCommon):
+    psp_payment_id: str
+    refund_id: str                # Orbit's refund id (NOT PSP's)
+    amount_to_refund: int | None = None
+    reason: str | None = None
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `request.amount` (no such field) | `request.amount_to_refund: int \| None` |
+| `request.refund_amount` | `request.amount_to_refund` |
+| `RefundRequest(psp_refund_id=...)` | `RefundRequest(refund_id=...)` — psp_refund_id is on RESPONSE, not REQUEST |
+
+### `RefundResponse`
+
+```python
+class RefundResponse(BaseModel):
+    psp_refund_id: str
+    status: RefundStatus
+    refunded_amount: int | None = None    # MINOR UNITS, not Amount
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `RefundResponse(refunded_amount=Amount(...))` | `refunded_amount=int_value_in_minor_units` |
+
+### `SyncRefundRequest`
+
+```python
+class SyncRefundRequest(RequestCommon):
+    psp_refund_id: str            # PSP's refund id, NOT Orbit's
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `SyncRefundRequest(refund_id=...)` | `SyncRefundRequest(psp_refund_id=...)` |
+| `SyncRefundRequest(psp_order_id=...)` | no such field — this request takes only the refund id + RequestCommon |
+
+### `SyncRefundResponse`
+
+```python
+class SyncRefundResponse(BaseModel):
+    psp_refund_id: str
+    status: RefundStatus
+    refunded_amount: int | None = None    # MINOR UNITS, not Amount
+    failure_reason: str | None = None
+```
+
+### `RefundEvent` (lives inside WebhookEvent.refund)
+
+```python
+class RefundEvent(BaseModel):
+    psp_refund_id: str             # REQUIRED
+    psp_payment_id: str             # REQUIRED — easy to forget; refund hangs off a payment
+    psp_order_id: str | None = None
+    status: RefundStatus
+    refunded_amount: int | None = None    # MINOR UNITS
+    failure_reason: str | None = None
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `RefundEvent(...)` without `psp_payment_id` | both `psp_refund_id` AND `psp_payment_id` are required |
+
+### `WebhookEvent`
+
+```python
+class WebhookEvent(BaseModel):
+    event_type: WebhookEventType
+    psp_event_id: str
+    psp_order_id: str | None = None
+    attempt: PaymentAttempt | None = None          # ← "attempt" not "payment_attempt"
+    refund:  RefundEvent     | None = None         # ← "refund"  not "refund_event"
+    raw_payload: dict[str, Any]
+```
+
+| ✗ Don't write | ✓ Write |
+|---|---|
+| `WebhookEvent(payment_attempt=...)` | `WebhookEvent(attempt=...)` |
+| `WebhookEvent(refund_event=...)` | `WebhookEvent(refund=...)` |
+| `event.payment_attempt` (in tests) | `event.attempt` |
+| `event.refund_event` (in tests) | `event.refund` |
+
 ## 4b. Response field names are locked
 
 Every domain response model has `extra="forbid"` — passing a keyword arg the model doesn't declare raises a Pydantic `ValidationError` and mypy will refuse to compile because it's `[call-arg]`. Don't invent fields.
