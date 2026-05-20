@@ -10,6 +10,7 @@ from grace.pipeline.types import GenerationContext, PspDocs
 
 RULEBOOK_FILES = [
     "rulesbook/codegen/python/README.md",
+    "rulesbook/codegen/python/pitfalls.md",
     "rulesbook/codegen/python/ground_rules.md",
     "rulesbook/codegen/python/connector_abc.md",
     "rulesbook/codegen/python/domain_types.md",
