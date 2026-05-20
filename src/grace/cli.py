@@ -9,6 +9,7 @@ from typing import Any
 import click
 
 from grace.config import load_config
+from grace.docs_build import build_docs
 from grace.errors import GraceError, GraceErrorReason
 from grace.fetch_docs import fetch_docs
 from grace.pipeline import GenerationContext, PipelineHooks, run_pipeline
@@ -208,6 +209,18 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
         click.echo("─" * 78)
         _save_last_run(psp=psp, source=source, output=out)
         click.echo(f"OK: wrote {out}")
+
+        # Auto-refresh the consumer-side docs catalog so llms.txt stays in sync
+        # with every successful generation. Best-effort: a docs-build failure
+        # shouldn't fail the generation.
+        try:
+            docs_result = build_docs(lens_root=Path.cwd())
+            click.echo(
+                f"OK: refreshed {docs_result.output_root.relative_to(Path.cwd())} "
+                f"({len(docs_result.connectors)} connectors)"
+            )
+        except GraceError as e:
+            click.echo(f"warning: docs refresh skipped — {e.reason.value}: {e.detail}", err=True)
     except GraceError as e:
         raise _click_error_from_grace(e) from e
 
@@ -265,6 +278,27 @@ def fetch_docs_cmd(
     click.echo(
         f"OK: wrote {len(result.files_written)} files to {result.output_dir} "
         f"(skipped {result.skipped_count} by filter)"
+    )
+
+
+@main.command()
+def docs() -> None:
+    """Build the consumer-side docs catalog (docs-generated/llms.txt + per-connector .md).
+
+    Run from inside the consumer repo (e.g. Lens). Static-analyzes every
+    package under `<cwd>/lens/connectors/*/` and emits
+    `<cwd>/docs-generated/llms.txt` plus one `.md` per connector. Idempotent.
+
+    This is invoked automatically at the end of every successful `grace generate`,
+    so most users won't need to run it directly.
+    """
+    try:
+        result = build_docs(lens_root=Path.cwd())
+    except GraceError as e:
+        raise _click_error_from_grace(e) from e
+    click.echo(
+        f"OK: wrote {len(result.files_written)} files under "
+        f"{result.output_root} ({len(result.connectors)} connectors discovered)"
     )
 
 

@@ -206,6 +206,49 @@ def test_generate_prints_hint_on_timeout(
     assert "did not finish within 6000.0s" in result.output
 
 
+def test_docs_cli_writes_under_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`grace docs` runs build_docs against Path.cwd() and prints a success line."""
+    fake_root = tmp_path / "lens-checkout"
+    pkg = fake_root / "lens" / "connectors" / "demo"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text(
+        'requires_lens = "^0.1"\n'
+        "from .connector import Demo\n"
+        "from lens.factory import ConnectorFactory\n"
+        'ConnectorFactory.register("demo", Demo)\n'
+    )
+    (pkg / "connector.py").write_text(
+        "from lens.connector import Connector\n"
+        "class Demo(Connector):\n"
+        "    async def create_order(self, request): ...\n"
+        "    async def sync_payment(self, request): ...\n"
+        "    async def refund(self, request): ...\n"
+        "    async def sync_refund(self, request): ...\n"
+        "    async def handle_webhook(self, raw_payload, headers): ...\n"
+        "    async def close(self): ...\n"
+    )
+    (pkg / "status_map.py").write_text("STATUS_MAP = {}\n")
+
+    monkeypatch.chdir(fake_root)
+    result = CliRunner().invoke(main, ["docs"])
+    assert result.exit_code == 0, result.output
+    assert "1 connectors discovered" in result.output
+    assert (fake_root / "docs-generated" / "llms.txt").is_file()
+    assert (fake_root / "docs-generated" / "connectors" / "demo.md").is_file()
+
+
+def test_docs_cli_errors_when_no_connectors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["docs"])
+    assert result.exit_code != 0
+    assert "CONTEXT_BUNDLE_INVALID" in result.output
+    assert "grace generate" in result.output
+
+
 def test_fetch_docs_cli_defaults_include_when_unset(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
