@@ -63,7 +63,20 @@ def run_pytest_with_cov(*, target: Path) -> PytestReport:
 
 
 def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> None:
-    """Run mypy + pytest + rubric. Raise GraceError if any gate fails."""
+    """Run mypy + pytest + rubric. Raise GraceError if any gate fails.
+
+    Three independent gates per constitution §4 (`SUBPROJECT_GRACE_CODEGEN.md`):
+      - mypy --strict clean (binary)
+      - pytest --cov ≥ 80% (binary hard floor)
+      - Rubric ≥ 60/100 (graded, includes coverage as a dimension with
+        linear scaling — that's where the "report passed but gate failed"
+        drift used to come from)
+
+    The combined `quality_report.json` exposes each gate's decision
+    explicitly so the report and the CLI error never disagree again.
+    """
+    import json as _json
+
     from grace.quality_rubric import RubricReport, score_rubric
 
     # The runner is supposed to materialize this directory but defend against the
@@ -77,21 +90,56 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
         mypy_report=mypy_report,
         pytest_report=pytest_report,
     )
-    # Always write the report next to the package.
-    (result.output_dir / "quality_report.json").write_text(rubric.to_json())
+
+    coverage_pct = pytest_report.coverage_pct if pytest_report.coverage_pct is not None else 0.0
+    mypy_error_count = _count_mypy_errors(mypy_report.stdout)
+    gates = {
+        "mypy": {
+            "passed": mypy_report.passed,
+            "threshold": "clean (--strict)",
+            "actual": "clean" if mypy_report.passed else f"{mypy_error_count} error(s)",
+        },
+        "coverage": {
+            "passed": coverage_pct >= 80.0,
+            "threshold": "≥ 80% line coverage",
+            "actual": f"{coverage_pct:.1f}%",
+        },
+        "rubric": {
+            "passed": rubric.total >= 60,
+            "threshold": "≥ 60 / 100",
+            "actual": rubric.total,
+        },
+    }
+    overall_passed = all(bool(g["passed"]) for g in gates.values())
+
+    rubric_payload = rubric.to_dict()
+    # The nested rubric block keeps its own `passed` field (rubric-only ≥ 60).
+    # Top-level `passed` reflects ALL gates — no more drift between report and CLI.
+    report_payload = {
+        "passed": overall_passed,
+        "gates": gates,
+        "rubric": rubric_payload,
+    }
+    (result.output_dir / "quality_report.json").write_text(
+        _json.dumps(report_payload, indent=2)
+    )
 
     failures: list[str] = []
-    if not mypy_report.passed:
+    if not gates["mypy"]["passed"]:
         last_line = (
             mypy_report.stdout.strip().splitlines()[-1] if mypy_report.stdout else "failed"
         )
         failures.append(f"mypy: {last_line}")
-    if pytest_report.coverage_pct is not None and pytest_report.coverage_pct < 80.0:
-        failures.append(f"coverage: {pytest_report.coverage_pct:.1f}% < 80%")
-    if rubric.total < 60:
+    if not gates["coverage"]["passed"]:
+        failures.append(f"coverage: {coverage_pct:.1f}% < 80%")
+    if not gates["rubric"]["passed"]:
         failures.append(f"rubric: {rubric.total} < 60")
     if failures:
         raise GraceError(
             reason=GraceErrorReason.QUALITY_GATE_FAILED,
             detail="; ".join(failures),
         )
+
+
+def _count_mypy_errors(stdout: str) -> int:
+    return sum(1 for line in stdout.splitlines() if ": error:" in line)

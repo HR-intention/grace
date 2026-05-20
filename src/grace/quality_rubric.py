@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from grace.pipeline.gates import MypyReport, PytestReport
 from grace.pipeline.marker import has_marker
@@ -32,24 +33,27 @@ class RubricReport:
     def total(self) -> int:
         return sum(d.score for d in self.dimensions)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Rubric-only payload. Used as a sub-object inside the combined
+        quality_report.json. Note: `passed` here means "rubric ≥ 60" only —
+        not the combined gate decision (which sits at the top level)."""
+        return {
+            "total": self.total,
+            "passed": self.total >= 60,
+            "dimensions": [
+                {
+                    "name": d.name,
+                    "max": d.max,
+                    "score": d.score,
+                    "detail": d.detail,
+                    "findings": d.findings,
+                }
+                for d in self.dimensions
+            ],
+        }
+
     def to_json(self) -> str:
-        return json.dumps(
-            {
-                "total": self.total,
-                "passed": self.total >= 60,
-                "dimensions": [
-                    {
-                        "name": d.name,
-                        "max": d.max,
-                        "score": d.score,
-                        "detail": d.detail,
-                        "findings": d.findings,
-                    }
-                    for d in self.dimensions
-                ],
-            },
-            indent=2,
-        )
+        return json.dumps(self.to_dict(), indent=2)
 
 
 # --- required public surface (per SUBPROJECT_GRACE_CODEGEN.md §3.2 + §5) ---
