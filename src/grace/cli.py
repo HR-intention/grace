@@ -9,11 +9,71 @@ from typing import Any
 import click
 
 from grace.config import load_config
-from grace.errors import GraceError
+from grace.errors import GraceError, GraceErrorReason
 from grace.fetch_docs import fetch_docs
 from grace.pipeline import GenerationContext, PipelineHooks, run_pipeline
 from grace.pipeline.context import assemble_context
 from grace.pipeline.runner import ClaudeCodeRunner
+
+
+# Per-reason actionable hints surfaced to the user when a GraceError bubbles up
+# through the CLI. Detail (the underlying stderr/stdout from the failing
+# subprocess) is preserved alongside the hint.
+_ERROR_HINTS: dict[GraceErrorReason, str] = {
+    GraceErrorReason.CLAUDE_CODE_NOT_AUTHENTICATED: (
+        "claude -p got a 401 from the Anthropic API.\n"
+        "  For Pro/Max subscribers (no API key needed):\n"
+        "    claude setup-token\n"
+        '    export CLAUDE_CODE_OAUTH_TOKEN="<paste-the-token>"\n'
+        "  Then verify with: echo hi | claude -p\n"
+        "  See README \"Troubleshooting\" or anthropics/claude-code#28827."
+    ),
+    GraceErrorReason.CLAUDE_CODE_NOT_FOUND: (
+        "Install Claude Code first (https://docs.claude.com/claude-code),\n"
+        "  then `claude /login` (or `claude setup-token`)."
+    ),
+    GraceErrorReason.CLAUDE_CODE_TIMEOUT: (
+        "Generation timed out. Bump the timeout in ~/.grace/config.yaml:\n"
+        "    claude_code:\n"
+        "      timeout_s: 9000   # raise from the default 6000s\n"
+        "  Then retry."
+    ),
+    GraceErrorReason.CLAUDE_CODE_FAILED: (
+        "claude -p exited non-zero for a non-auth reason. Inspect the detail above.\n"
+        "  Try `echo hi | claude -p` to confirm the CLI itself works."
+    ),
+    GraceErrorReason.CONTEXT_BUNDLE_INVALID: (
+        "Rulebook file missing. Are you running grace from inside the Grace repo?\n"
+        "  cd into the Grace fork and retry; grace resolves rulebook paths relative\n"
+        "  to its own source tree."
+    ),
+    GraceErrorReason.QUALITY_GATE_FAILED: (
+        "Generated package failed quality gates. Open\n"
+        "    <output>/quality_report.json\n"
+        "  for the per-dimension breakdown, then sharpen the rulebook page that maps\n"
+        "  to the missing dimension and `grace regenerate <psp>`. Do NOT hand-edit\n"
+        "  generated files (constitution §4)."
+    ),
+    GraceErrorReason.SOURCE_FETCH_FAILED: (
+        "Could not load the docs source. Check the URL / file path / network and retry."
+    ),
+    GraceErrorReason.CONFIG_INVALID: (
+        "~/.grace/config.yaml is malformed. The detail above points at the offending key."
+    ),
+}
+
+
+def _click_error_from_grace(e: GraceError) -> click.ClickException:
+    """Translate a GraceError into a ClickException with an actionable hint."""
+    hint = _ERROR_HINTS.get(e.reason, "")
+    detail = (e.detail or "").strip()
+    pieces: list[str] = [e.reason.value]
+    if detail:
+        pieces.append(detail)
+    if hint:
+        pieces.append("")
+        pieces.append(hint)
+    return click.ClickException("\n".join(pieces))
 
 
 def _grace_version() -> str:
@@ -136,7 +196,7 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
         _save_last_run(psp=psp, source=source, output=out)
         click.echo(f"OK: wrote {out}")
     except GraceError as e:
-        raise click.ClickException(f"{e.reason.value}: {e.detail or ''}") from e
+        raise _click_error_from_grace(e) from e
 
 
 @main.command(name="fetch-docs")
@@ -188,7 +248,7 @@ def fetch_docs_cmd(
             exclude=list(exclude) if exclude else None,
         )
     except GraceError as e:
-        raise click.ClickException(f"{e.reason.value}: {e.detail or ''}") from e
+        raise _click_error_from_grace(e) from e
     click.echo(
         f"OK: wrote {len(result.files_written)} files to {result.output_dir} "
         f"(skipped {result.skipped_count} by filter)"

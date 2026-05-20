@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from grace.cli import main
+from grace.errors import GraceError, GraceErrorReason
 
 
 def test_version_flag() -> None:
@@ -147,6 +148,62 @@ def test_fetch_docs_cli_writes_output(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert "1 files" in result.output
     assert captured["psp_name"] == "cashfree"
     assert captured["include"] == ["*/orders/*"]
+
+
+def test_generate_prints_actionable_hint_on_401(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A CLAUDE_CODE_NOT_AUTHENTICATED from the pipeline surfaces with the
+    `claude setup-token` hint, not a bare reason code."""
+
+    async def fake_run_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
+        raise GraceError(
+            reason=GraceErrorReason.CLAUDE_CODE_NOT_AUTHENTICATED,
+            detail='API Error: 401 {"type":"authentication_error"}',
+        )
+
+    monkeypatch.setattr("grace.cli._run_pipeline", fake_run_pipeline)
+
+    spec = tmp_path / "docs"
+    spec.mkdir()
+    (spec / "x.md").write_text("# x")
+    result = CliRunner().invoke(
+        main,
+        ["generate", "cashfree", "--from", str(spec), "--output", str(tmp_path / "out")],
+    )
+    assert result.exit_code != 0
+    out = result.output
+    assert "CLAUDE_CODE_NOT_AUTHENTICATED" in out
+    assert "claude setup-token" in out
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in out
+    # The underlying detail is preserved alongside the hint.
+    assert "API Error: 401" in out
+    # The README pointer / GitHub issue tag is mentioned for further reading.
+    assert "anthropics/claude-code" in out
+
+
+def test_generate_prints_hint_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def fake_run_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
+        raise GraceError(
+            reason=GraceErrorReason.CLAUDE_CODE_TIMEOUT,
+            detail="claude did not finish within 6000.0s",
+        )
+
+    monkeypatch.setattr("grace.cli._run_pipeline", fake_run_pipeline)
+
+    spec = tmp_path / "docs"
+    spec.mkdir()
+    (spec / "x.md").write_text("# x")
+    result = CliRunner().invoke(
+        main,
+        ["generate", "cashfree", "--from", str(spec), "--output", str(tmp_path / "out")],
+    )
+    assert result.exit_code != 0
+    assert "CLAUDE_CODE_TIMEOUT" in result.output
+    assert "timeout_s" in result.output
+    assert "did not finish within 6000.0s" in result.output
 
 
 def test_fetch_docs_cli_defaults_include_when_unset(
