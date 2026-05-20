@@ -57,3 +57,128 @@ def test_generate_calls_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert result.exit_code == 0, result.output
     assert called["psp"] == "cashfree"
     assert called["target"] == "lens.connectors.cashfree"
+
+
+def test_generate_defaults_to_connector_docs_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When --from is omitted, generate falls back to <repo>/connector_docs/<psp>/."""
+    fake_repo = tmp_path / "repo"
+    docs = fake_repo / "connector_docs" / "demo"
+    docs.mkdir(parents=True)
+    (docs / "00_overview.md").write_text("# overview")
+    # The Grace rulebook needs to exist under fake_repo too; cheaper to point
+    # _repo_root at the real repo and just shim _default_docs_dir.
+    real_repo = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr("grace.cli._default_docs_dir", lambda _psp: docs)
+    monkeypatch.setattr("grace.cli._repo_root", lambda: real_repo)
+
+    captured: dict[str, str] = {}
+
+    async def fake_run_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
+        captured["source"] = ctx.psp_docs.source_uri  # type: ignore[attr-defined]
+        return None
+
+    monkeypatch.setattr("grace.cli._run_pipeline", fake_run_pipeline)
+
+    out = tmp_path / "out"
+    result = CliRunner().invoke(main, ["generate", "demo", "--output", str(out)])
+    assert result.exit_code == 0, result.output
+    assert captured["source"] == str(docs)
+
+
+def test_generate_missing_docs_dir_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No --from + empty connector_docs/<psp>/ → ClickException with a hint."""
+    empty = tmp_path / "connector_docs" / "empty"
+    empty.mkdir(parents=True)
+    monkeypatch.setattr("grace.cli._default_docs_dir", lambda _psp: empty)
+    result = CliRunner().invoke(main, ["generate", "empty"])
+    assert result.exit_code != 0
+    assert "fetch-docs" in result.output
+
+
+def test_fetch_docs_cli_writes_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_fetch_docs(
+        *,
+        psp_name: str,
+        source: str,
+        output_dir: Path,
+        include: object,
+        exclude: object,
+    ) -> object:
+        captured["psp_name"] = psp_name
+        captured["source"] = source
+        captured["output_dir"] = output_dir
+        captured["include"] = include
+        captured["exclude"] = exclude
+
+        out_dir = output_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "01_x.md").write_text("# x")
+
+        class _Result:
+            output_dir = out_dir
+            files_written = [out_dir / "01_x.md"]
+            skipped_count = 3
+
+        return _Result()
+
+    monkeypatch.setattr("grace.cli.fetch_docs", fake_fetch_docs)
+
+    out = tmp_path / "connector_docs" / "cashfree"
+    result = CliRunner().invoke(
+        main,
+        [
+            "fetch-docs",
+            "cashfree",
+            "--from",
+            "https://example.com/llms.txt",
+            "--include",
+            "*/orders/*",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "1 files" in result.output
+    assert captured["psp_name"] == "cashfree"
+    assert captured["include"] == ["*/orders/*"]
+
+
+def test_fetch_docs_cli_defaults_include_when_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_fetch_docs(
+        *,
+        psp_name: str,
+        source: str,
+        output_dir: Path,
+        include: object,
+        exclude: object,
+    ) -> object:
+        captured["include"] = include
+        captured["exclude"] = exclude
+
+        out_dir = output_dir
+
+        class _R:
+            output_dir = out_dir
+            files_written: list[Path] = []
+            skipped_count = 0
+
+        return _R()
+
+    monkeypatch.setattr("grace.cli.fetch_docs", fake_fetch_docs)
+    result = CliRunner().invoke(
+        main,
+        ["fetch-docs", "cashfree", "--from", "x.txt", "--output", str(tmp_path / "out")],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["include"] is None
+    assert captured["exclude"] is None

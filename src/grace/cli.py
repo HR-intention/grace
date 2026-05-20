@@ -10,6 +10,7 @@ import click
 
 from grace.config import load_config
 from grace.errors import GraceError
+from grace.fetch_docs import fetch_docs
 from grace.pipeline import GenerationContext, PipelineHooks, run_pipeline
 from grace.pipeline.context import assemble_context
 from grace.pipeline.runner import ClaudeCodeRunner
@@ -74,9 +75,22 @@ def doctor() -> None:
     raise SystemExit(1)
 
 
+def _default_docs_dir(psp: str) -> Path:
+    """`connector_docs/<psp>/` under the repo root."""
+    return _repo_root() / "connector_docs" / psp
+
+
 @main.command()
 @click.argument("psp")
-@click.option("--from", "source", required=True, help="URL, local file, or local directory of PSP docs.")
+@click.option(
+    "--from",
+    "source",
+    default=None,
+    help=(
+        "URL, local file, or local directory of PSP docs. "
+        "Defaults to <repo>/connector_docs/<psp>/ (populated by `grace fetch-docs`)."
+    ),
+)
 @click.option(
     "--output",
     "output",
@@ -91,9 +105,19 @@ def doctor() -> None:
     default=None,
     help="Path to grace config.yaml; defaults to ~/.grace/config.yaml.",
 )
-def generate(psp: str, source: str, output: Path | None, config: Path | None) -> None:
+def generate(psp: str, source: str | None, output: Path | None, config: Path | None) -> None:
     """Generate a connector package for PSP from the given source."""
     cfg = load_config(config_path=config)
+
+    if source is None:
+        default = _default_docs_dir(psp)
+        if not default.is_dir() or not any(default.iterdir()):
+            raise click.ClickException(
+                f"no --from and {default} is empty; run "
+                f"`grace fetch-docs {psp} --from <llms.txt-url>` first"
+            )
+        source = str(default)
+
     out = output or (Path.cwd() / "lens" / "connectors" / psp)
     try:
         ctx = assemble_context(
@@ -113,6 +137,62 @@ def generate(psp: str, source: str, output: Path | None, config: Path | None) ->
         click.echo(f"OK: wrote {out}")
     except GraceError as e:
         raise click.ClickException(f"{e.reason.value}: {e.detail or ''}") from e
+
+
+@main.command(name="fetch-docs")
+@click.argument("psp")
+@click.option(
+    "--from",
+    "source",
+    required=True,
+    help="URL or local path of an llms.txt file listing the PSP's doc pages.",
+)
+@click.option(
+    "--include",
+    "include",
+    multiple=True,
+    help=(
+        "Glob to keep (matched against URL path). Repeat for OR. "
+        "Defaults are tuned for hosted-checkout PSPs (orders/payments/refunds/"
+        "webhooks/auth/errors). Out-of-scope sections are excluded by default."
+    ),
+)
+@click.option(
+    "--exclude",
+    "exclude",
+    multiple=True,
+    help="Glob to drop (matched against URL path). Repeat for OR.",
+)
+@click.option(
+    "--output",
+    "output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output directory. Defaults to <repo>/connector_docs/<psp>/.",
+)
+def fetch_docs_cmd(
+    psp: str,
+    source: str,
+    include: tuple[str, ...],
+    exclude: tuple[str, ...],
+    output: Path | None,
+) -> None:
+    """Fetch a PSP's docs from its llms.txt into connector_docs/<psp>/."""
+    out = output or _default_docs_dir(psp)
+    try:
+        result = fetch_docs(
+            psp_name=psp,
+            source=source,
+            output_dir=out,
+            include=list(include) if include else None,
+            exclude=list(exclude) if exclude else None,
+        )
+    except GraceError as e:
+        raise click.ClickException(f"{e.reason.value}: {e.detail or ''}") from e
+    click.echo(
+        f"OK: wrote {len(result.files_written)} files to {result.output_dir} "
+        f"(skipped {result.skipped_count} by filter)"
+    )
 
 
 @main.command()
