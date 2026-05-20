@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from grace.errors import GraceError, GraceErrorReason
-from grace.pipeline.runner import ClaudeCodeRunner
+from grace.pipeline.runner import ClaudeCodeRunner, format_stream_event
 from grace.pipeline.types import GenerationContext, PspDocs
 
 
@@ -189,6 +189,89 @@ def test_generate_raises_on_nonzero_exit(
     }
 
 
+def test_format_stream_event_system_init() -> None:
+    line = '{"type":"system","subtype":"init","model":"claude-x","tools":["Read","Write"]}'
+    out = format_stream_event(line)
+    assert out is not None
+    assert "session started" in out
+    assert "model=claude-x" in out
+    assert "2 tools" in out
+
+
+def test_format_stream_event_assistant_tool_use() -> None:
+    line = (
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read",'
+        '"input":{"file_path":"/tmp/x.md"}}]}}'
+    )
+    out = format_stream_event(line)
+    assert out is not None
+    assert "→ Read(/tmp/x.md)" in out
+
+
+def test_format_stream_event_assistant_text_emits_text() -> None:
+    line = '{"type":"assistant","message":{"content":[{"type":"text","text":"working on it"}]}}'
+    out = format_stream_event(line)
+    assert out is not None
+    assert "working on it" in out
+
+
+def test_format_stream_event_result_summary() -> None:
+    line = (
+        '{"type":"result","subtype":"success","total_cost_usd":0.0042,'
+        '"duration_ms":12345,"is_error":false}'
+    )
+    out = format_stream_event(line)
+    assert out is not None
+    assert "done" in out
+    assert "cost=$0.0042" in out
+    assert "duration=12.3s" in out
+
+
+def test_format_stream_event_passes_through_non_json() -> None:
+    line = "Loading Claude Code v2.1.118\n"
+    out = format_stream_event(line)
+    assert out == line
+
+
+def test_format_stream_event_skips_blank() -> None:
+    assert format_stream_event("\n") is None
+    assert format_stream_event("") is None
+
+
+def test_format_stream_event_skips_hook_events() -> None:
+    # SessionStart hook firing — pure noise to the user, kept only in raw buffer.
+    line = (
+        '{"type":"system","subtype":"hook_started","hook_id":"x","hook_name":"SessionStart:startup"}'
+    )
+    assert format_stream_event(line) is None
+    line2 = '{"type":"system","subtype":"hook_response","hook_id":"x","output":"...huge..."}'
+    assert format_stream_event(line2) is None
+
+
+def test_format_stream_event_skips_rate_limit() -> None:
+    line = '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'
+    assert format_stream_event(line) is None
+
+
+def test_format_stream_event_unknown_type_emits_short_marker() -> None:
+    line = '{"type":"future_thing","subtype":"weird","payload":"' + ("X" * 5000) + '"}'
+    out = format_stream_event(line)
+    assert out is not None
+    assert "unknown event: future_thing/weird" in out
+    # Crucially: must not dump the huge payload.
+    assert len(out) < 200
+
+
+def test_format_stream_event_tool_use_write_includes_size() -> None:
+    line = (
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write",'
+        '"input":{"file_path":"/tmp/connector.py","content":"hello world"}}]}}'
+    )
+    out = format_stream_event(line)
+    assert out is not None
+    assert "Write(/tmp/connector.py, 11B)" in out
+
+
 def test_generate_streams_stdout_to_sink_live(
     monkeypatch: pytest.MonkeyPatch, fake_ctx: GenerationContext, tmp_path: Path
 ) -> None:
@@ -199,12 +282,18 @@ def test_generate_streams_stdout_to_sink_live(
     binary.chmod(0o755)
     monkeypatch.setattr(shutil, "which", lambda _: str(binary))
 
+    # Simulate `claude -p --output-format stream-json --verbose` output: three
+    # JSONL events arrive over time and each gets formatted.
+    jsonl = (
+        b'{"type":"system","subtype":"init","model":"claude-x","tools":["Read"]}\n'
+        b'{"type":"assistant","message":{"content":['
+        b'{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/rb.md"}}'
+        b']}}\n'
+        b'{"type":"result","subtype":"success","total_cost_usd":0.001,"duration_ms":100}\n'
+    )
+
     async def _exec(*a: Any, **k: Any) -> _FakeProc:
-        return _FakeProc(
-            stdout_bytes=b"reading rulebook...\ngenerating connector.py...\ndone\n",
-            stderr_bytes=b"",
-            returncode=0,
-        )
+        return _FakeProc(stdout_bytes=jsonl, stderr_bytes=b"", returncode=0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _exec)
 
@@ -212,8 +301,11 @@ def test_generate_streams_stdout_to_sink_live(
     runner = ClaudeCodeRunner(stdout_sink=captured.append, stderr_sink=lambda _t: None)
     result = asyncio.run(runner.generate(fake_ctx))
 
-    assert "reading rulebook...\n" in captured
-    assert "generating connector.py...\n" in captured
-    assert "done\n" in captured
-    # Streamed text is also preserved in the GenerationResult for downstream logging.
-    assert "reading rulebook...\n" in result.stdout
+    # The formatter turned each JSONL event into a human-readable line that hit
+    # the sink as it arrived.
+    joined = "".join(captured)
+    assert "session started" in joined
+    assert "Read(/tmp/rb.md)" in joined
+    assert "done" in joined
+    # Raw transcript is preserved for error scanning + GenerationResult.
+    assert '"type":"system"' in result.stdout
