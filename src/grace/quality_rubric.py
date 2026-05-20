@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from grace.pipeline.gates import MypyReport, PytestReport
@@ -17,6 +17,11 @@ class Dimension:
     max: int
     score: int
     detail: str
+    findings: list[str] = field(default_factory=list)
+    """Per-item breakdown of what this dimension found. `detail` is a one-line
+    summary; `findings` is the full list (e.g. every mypy error line, every
+    failing pytest case). Empty for binary-pass dimensions or when there's
+    nothing more to say."""
 
 
 @dataclass(frozen=True)
@@ -33,7 +38,13 @@ class RubricReport:
                 "total": self.total,
                 "passed": self.total >= 60,
                 "dimensions": [
-                    {"name": d.name, "max": d.max, "score": d.score, "detail": d.detail}
+                    {
+                        "name": d.name,
+                        "max": d.max,
+                        "score": d.score,
+                        "detail": d.detail,
+                        "findings": d.findings,
+                    }
                     for d in self.dimensions
                 ],
             },
@@ -76,12 +87,75 @@ def _score_marker(output_dir: Path) -> Dimension:
     return Dimension("marker_conformance", 5, 5, "all files carry the §4 marker")
 
 
+def _parse_mypy_findings(stdout: str) -> list[str]:
+    """Split mypy --strict output into one entry per error/note line.
+
+    Drops blank lines and the `Found N errors ...` / `Success: ...` summary.
+    Keeps `: error:` and `: note:` lines (notes give context — e.g. the file
+    where a type was defined — that's useful when fixing the error).
+    """
+    out: list[str] = []
+    for line in stdout.splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        if line.startswith(("Found ", "Success:")):
+            continue
+        if ": error:" in line or ": note:" in line:
+            out.append(line)
+    return out
+
+
+def _summarize_mypy(findings: list[str]) -> str:
+    if not findings:
+        return "mypy failed (no parseable errors)"
+    errors = sum(1 for f in findings if ": error:" in f)
+    notes = sum(1 for f in findings if ": note:" in f)
+    return f"mypy failed: {errors} error(s)" + (f", {notes} note(s)" if notes else "")
+
+
 def _score_type_correctness(mypy_report: MypyReport) -> Dimension:
     if mypy_report.passed:
         return Dimension("type_correctness", 20, 20, "mypy --strict clean")
+    findings = _parse_mypy_findings(mypy_report.stdout)
     return Dimension(
-        "type_correctness", 20, 0, f"mypy failed: {mypy_report.stdout.strip()[:200]}"
+        name="type_correctness",
+        max=20,
+        score=0,
+        detail=_summarize_mypy(findings),
+        findings=findings,
     )
+
+
+def _parse_pytest_findings(stdout: str) -> list[str]:
+    """Pull the most useful lines out of a failed pytest run.
+
+    Captures: collection errors, individual test failures (`FAILED`/`ERROR`
+    lines), and the short test summary block at the end. Drops banner output,
+    rerun hints, etc.
+    """
+    out: list[str] = []
+    in_short_summary = False
+    for line in stdout.splitlines():
+        line = line.rstrip()
+        if not line:
+            continue
+        if line.startswith("=") and "short test summary" in line:
+            in_short_summary = True
+            continue
+        if line.startswith("=") and in_short_summary:
+            in_short_summary = False
+            continue
+        if in_short_summary:
+            out.append(line)
+            continue
+        # Outside the short-summary block, only capture FAILED / ERROR markers
+        # (one per failing case) + collection errors.
+        if line.startswith(("FAILED ", "ERROR ")):
+            out.append(line)
+        elif "Interrupted: " in line and "error" in line.lower():
+            out.append(line)
+    return out
 
 
 def _score_coverage(pytest_report: PytestReport) -> Dimension:
@@ -89,7 +163,14 @@ def _score_coverage(pytest_report: PytestReport) -> Dimension:
     if pct >= 80.0:
         return Dimension("test_coverage", 25, 25, f"coverage {pct:.1f}% ≥ 80%")
     score = int(round((pct / 80.0) * 25))
-    return Dimension("test_coverage", 25, score, f"coverage {pct:.1f}% < 80%")
+    findings = _parse_pytest_findings(pytest_report.stdout)
+    return Dimension(
+        name="test_coverage",
+        max=25,
+        score=score,
+        detail=f"coverage {pct:.1f}% < 80%",
+        findings=findings,
+    )
 
 
 def _score_public_surface(ctx: GenerationContext, output_dir: Path) -> Dimension:

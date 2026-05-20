@@ -4,7 +4,11 @@ from pathlib import Path
 
 from grace.pipeline.gates import MypyReport, PytestReport
 from grace.pipeline.types import GenerationContext, PspDocs
-from grace.quality_rubric import score_rubric
+from grace.quality_rubric import (
+    _parse_mypy_findings,
+    _parse_pytest_findings,
+    score_rubric,
+)
 
 
 def _ctx(tmp_path: Path) -> GenerationContext:
@@ -147,6 +151,75 @@ def test_rubric_public_surface_fails_when_class_missing(tmp_path: Path) -> None:
     )
     surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
     assert surface_dim.score < surface_dim.max
+
+
+def test_parse_mypy_findings_splits_per_line_and_drops_summary() -> None:
+    stdout = (
+        "lens/connectors/cashfree/connector.py:66: error: Argument \"secret_key\" ...\n"
+        "lens/connectors/cashfree/connector.py:67: error: Argument \"webhook_secret\" ...\n"
+        "lens/connectors/cashfree/connector.py:294: note: \"WebhookEvent\" defined in ...\n"
+        "\n"
+        "Found 3 errors in 1 file (checked 11 source files)\n"
+    )
+    findings = _parse_mypy_findings(stdout)
+    assert len(findings) == 3
+    assert findings[0].endswith('error: Argument "secret_key" ...')
+    assert findings[2].endswith('"WebhookEvent" defined in ...')
+    assert all(not f.startswith("Found ") for f in findings)
+
+
+def test_parse_pytest_findings_captures_failures_and_short_summary() -> None:
+    stdout = (
+        "============================= test session starts =====\n"
+        "collected 5 items\n"
+        "tests/test_create_order.py F                          [ 20%]\n"
+        "FAILED tests/test_create_order.py::test_happy - AssertionError: x\n"
+        "ERROR tests/test_refund.py - lens.common.ConnectorError: ...\n"
+        "=========================== short test summary info ===\n"
+        "FAILED tests/test_create_order.py::test_happy - AssertionError: x\n"
+        "ERROR tests/test_refund.py - lens.common.ConnectorError: ...\n"
+        "=========================== 1 failed, 1 error in 0.3s\n"
+    )
+    findings = _parse_pytest_findings(stdout)
+    # The short-summary lines (deterministic, one per failing case) are kept.
+    failed = [f for f in findings if f.startswith("FAILED")]
+    errored = [f for f in findings if f.startswith("ERROR")]
+    assert len(failed) >= 1
+    assert len(errored) >= 1
+
+
+def test_rubric_type_correctness_carries_findings(tmp_path: Path) -> None:
+    """The detail is a short summary; findings is the full per-error list."""
+    ctx = _ctx(tmp_path)
+    _scaffold_full_pkg(ctx.output_dir)
+    report = score_rubric(
+        ctx=ctx,
+        output_dir=ctx.output_dir,
+        mypy_report=MypyReport(
+            passed=False,
+            stdout=(
+                "x/y.py:10: error: foo\n"
+                "x/y.py:11: error: bar\n"
+                "x/y.py:12: note: see definition\n"
+                "Found 2 errors in 1 file (checked 1 source file)\n"
+            ),
+            stderr="",
+        ),
+        pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
+    )
+    type_dim = next(d for d in report.dimensions if d.name == "type_correctness")
+    assert type_dim.score == 0
+    assert type_dim.detail == "mypy failed: 2 error(s), 1 note(s)"
+    assert type_dim.findings == [
+        "x/y.py:10: error: foo",
+        "x/y.py:11: error: bar",
+        "x/y.py:12: note: see definition",
+    ]
+    # JSON round-trip preserves findings.
+    import json as _json
+    decoded = _json.loads(report.to_json())
+    type_entry = next(d for d in decoded["dimensions"] if d["name"] == "type_correctness")
+    assert type_entry["findings"] == type_dim.findings
 
 
 def test_rubric_public_surface_fails_when_properties_missing(tmp_path: Path) -> None:
