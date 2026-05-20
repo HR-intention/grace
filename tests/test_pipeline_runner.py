@@ -272,6 +272,61 @@ def test_format_stream_event_tool_use_write_includes_size() -> None:
     assert "Write(/tmp/connector.py, 11B)" in out
 
 
+def test_generate_passes_add_dir_for_rulebook_and_psp_docs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every directory containing a rulebook file or PSP doc must be granted
+    via `--add-dir` so Claude can read them from cwd=output_dir."""
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\nexit 0")
+    binary.chmod(0o755)
+    monkeypatch.setattr(shutil, "which", lambda _: str(binary))
+
+    rb_dir = tmp_path / "grace_repo" / "rulesbook" / "codegen" / "python"
+    rb_dir.mkdir(parents=True)
+    rb_file = rb_dir / "connector_abc.md"
+    rb_file.write_text("# rulebook")
+
+    docs_dir = tmp_path / "lens_repo" / "connector_docs" / "cashfree"
+    docs_dir.mkdir(parents=True)
+    docs_file = docs_dir / "01_orders.md"
+    docs_file.write_text("# psp docs")
+
+    ctx = GenerationContext(
+        psp_name="cashfree",
+        rulebook_paths=[rb_file],
+        psp_docs=PspDocs(
+            source_uri=str(docs_dir), source_kind="local_dir", local_paths=[docs_file]
+        ),
+        output_dir=tmp_path / "lens_repo" / "lens" / "connectors" / "cashfree",
+        target_module="lens.connectors.cashfree",
+        lens_version_constraint="^0.1",
+        grace_version="0.1.0",
+        source_version="2024-09-01",
+    )
+
+    captured_args: list[str] = []
+
+    async def _exec(*args: Any, **k: Any) -> _FakeProc:
+        captured_args.extend(args)
+        return _FakeProc(stdout_bytes=b"", stderr_bytes=b"", returncode=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _exec)
+
+    asyncio.run(_silent_runner().generate(ctx))
+
+    # The argv now contains --add-dir <X> pairs. Verify both the rulebook
+    # parent and the psp-docs parent are present.
+    assert "--add-dir" in captured_args
+    add_dir_values = [
+        captured_args[i + 1]
+        for i, a in enumerate(captured_args[:-1])
+        if a == "--add-dir"
+    ]
+    assert any(str(rb_dir) == v or str(rb_dir.parent) in v for v in add_dir_values)
+    assert any(str(docs_dir) == v or str(docs_dir.parent) in v for v in add_dir_values)
+
+
 def test_generate_handles_oversized_line_without_crash(
     monkeypatch: pytest.MonkeyPatch, fake_ctx: GenerationContext, tmp_path: Path
 ) -> None:

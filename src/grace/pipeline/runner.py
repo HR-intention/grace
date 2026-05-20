@@ -288,6 +288,30 @@ class ClaudeCodeRunner:
         # `limit` raises the StreamReader's per-line cap above the asyncio
         # default 64 KiB so tool_result events embedding whole markdown files
         # don't trip a readline ValueError.
+        #
+        # `--add-dir` grants Claude read access to directories OUTSIDE cwd. The
+        # rulebook lives in Grace's repo and PSP docs live in the consumer's
+        # connector_docs/ — both outside cwd (= output_dir). Without these
+        # flags Claude can't open the absolute paths in the prompt and
+        # falls back to its training-data memory, ignoring the rulebook
+        # entirely (it announces this on stdout: "I'm blocked on file
+        # permissions ... let me proceed using my Cashfree API knowledge.").
+        extra_dirs: set[Path] = set()
+        for path in context.rulebook_paths:
+            extra_dirs.add(path.parent.resolve())
+        for path in context.psp_docs.local_paths:
+            extra_dirs.add(path.parent.resolve())
+        # Walk parents up — Claude needs the topmost shared ancestor in some
+        # versions to permit reads of nested paths. Add the immediate parent
+        # AND the grandparent for each (cheap belt-and-suspenders).
+        for d in list(extra_dirs):
+            if d.parent != d:
+                extra_dirs.add(d.parent)
+
+        add_dir_flags: list[str] = []
+        for d in sorted(extra_dirs):
+            add_dir_flags.extend(["--add-dir", str(d)])
+
         proc = await asyncio.create_subprocess_exec(
             str(binary),
             "-p",
@@ -296,6 +320,7 @@ class ClaudeCodeRunner:
             "--output-format",
             "stream-json",
             "--verbose",
+            *add_dir_flags,
             cwd=str(context.output_dir),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
