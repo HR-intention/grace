@@ -4,22 +4,40 @@ Build-time CLI that generates Python PSP (payment service provider) connectors f
 
 Grace itself runs only at build time. Generated code is committed to git and reviewed like any other code.
 
+**Dependency direction**: Grace is a standalone CLI tool with **zero knowledge of Lens**. Lens (or any other consumer) installs Grace as a build-time dev dependency, invokes the `grace` CLI from within its own tree, and lets Grace write generated code into its package. The quality-gate subprocesses (`mypy`, `pytest`) inherit the consumer's venv — so all the `from lens.connector import Connector` imports in the generated code resolve correctly. Grace itself never `import lens`.
+
 > **Scope (v0.4)**: hosted-checkout PSPs only, four flows (`create_order`, `sync_payment`, `refund`, `sync_refund`) + webhook. Server-to-server flows (`authorize`/`capture`/`void`) and recurring/mandates are deliberately out of scope; see [`docs/superpowers/specs/FUTURE_S2S_INTERFACE.md`](docs/superpowers/specs/FUTURE_S2S_INTERFACE.md).
 
 ---
 
 ## One-time setup
 
-### 1. Install
+### 1. Install Grace into the consumer's venv
 
-Requires Python ≥ 3.11. Uses [`uv`](https://docs.astral.sh/uv/) for env + deps.
+Requires Python ≥ 3.11. Grace is meant to be installed as a build-time dev dependency of the repo that consumes it (typically Lens). From the consumer repo:
+
+```bash
+# Option A — uv path dep (recommended if Grace and Lens are sibling checkouts)
+#   In the consumer's pyproject.toml:
+#     [project.optional-dependencies]
+#     dev = ["grace-cli", ...]
+#     [tool.uv.sources]
+#     grace-cli = { path = "../grace", editable = true }
+#   Then:
+uv sync --extra dev
+
+# Option B — explicit editable install
+uv pip install -e ../grace
+```
+
+Standalone Grace development (working on Grace itself, not generating connectors):
 
 ```bash
 cd grace
 uv sync --extra dev
 ```
 
-Verify:
+Verify the CLI either way:
 
 ```bash
 uv run grace --version
@@ -73,16 +91,25 @@ CLI flags override config. **No provider API keys live here.**
 
 ## Generating a connector
 
+**All commands below run from inside the consumer repo (Lens).** Grace's
+`connector_docs/<psp>/` defaults to `<cwd>/connector_docs/<psp>` and
+`--output` defaults to `<cwd>/lens/connectors/<psp>` — both versioned with
+the consumer, not with Grace. The quality-gate subprocesses (`mypy`,
+`pytest`) inherit the consumer's venv, so `from lens.connector import ...`
+in the generated code resolves naturally.
+
 Two-step workflow: snapshot the PSP's docs, then generate.
 
 ### Step 1 — Snapshot docs
 
-Most modern PSP doc sites publish an [`llms.txt`](https://llmstxt.org/) index listing every markdown page. `grace fetch-docs` reads that index, filters to the v1-relevant pages, and writes them to `connector_docs/<psp>/`.
+Most modern PSP doc sites publish an [`llms.txt`](https://llmstxt.org/) index listing every markdown page. `grace fetch-docs` reads that index, filters to the v1-relevant pages, and writes them to `<cwd>/connector_docs/<psp>/`.
 
 ```bash
+cd /path/to/lens
+
 # Cashfree
 uv run grace fetch-docs cashfree --from https://www.cashfree.com/docs/llms.txt
-# → writes ~30 .md files to connector_docs/cashfree/
+# → writes ~30 .md files to connector_docs/cashfree/ in the Lens repo
 
 # Razorpay (example URL — confirm the actual location)
 uv run grace fetch-docs razorpay --from https://razorpay.com/docs/llms.txt
@@ -97,7 +124,7 @@ uv run grace fetch-docs cashfree \
   --exclude "*previous/*"
 ```
 
-**Commit `connector_docs/<psp>/` to the repo.** This pins the docs Grace consumed at generation time, making the run reproducible.
+**Commit `connector_docs/<psp>/` in the Lens repo.** This pins the docs Grace consumed at generation time, making the run reproducible alongside the package it produced.
 
 ```bash
 git add connector_docs/cashfree/
@@ -107,26 +134,27 @@ git commit -m "docs(cashfree): snapshot v1 doc pages for grace"
 ### Step 2 — Generate
 
 ```bash
-uv run grace generate cashfree \
-  --output /tmp/grace_cashfree_run1/lens/connectors/cashfree
+# from inside the Lens repo
+uv run grace generate cashfree
+# → writes to lens/connectors/cashfree/ by default
 ```
 
-When `--from` is omitted, Grace defaults to `connector_docs/<psp>/`. Explicit `--from` accepts a URL, a local file, or a local directory.
+When `--from` is omitted, Grace defaults to `<cwd>/connector_docs/<psp>/`. When `--output` is omitted, Grace defaults to `<cwd>/lens/connectors/<psp>/`. Explicit `--from` accepts a URL, a local file, or a local directory.
 
 The pipeline:
 1. Assembles context (Grace rulebook + snapshotted docs).
-2. Spawns `claude -p --permission-mode acceptEdits`, CWD = output directory. Claude writes the package files.
+2. Spawns `claude -p --permission-mode acceptEdits`, CWD = output directory. Claude writes the package files. Output streams live to your terminal.
 3. Post-processes any `.py` missing the constitution §4 marker (belt-and-suspenders).
-4. Runs `mypy --strict` + `pytest --cov` + the 6-dimension rubric on the result.
+4. Runs `mypy --strict` + `pytest --cov` + the 6-dimension rubric. The gate subprocesses inherit the **consumer's venv** — so `from lens.connector import Connector` in the generated code resolves to the real Lens package (Lens must be installed in editable mode in its own dev venv for this to work; standard practice anyway).
 5. Writes `quality_report.json` next to the package; raises on any gate failure.
 
 Inspect the result:
 
 ```bash
-ls /tmp/grace_cashfree_run1/lens/connectors/cashfree/
+ls lens/connectors/cashfree/
 # __init__.py  auth.py  connector.py  models.py  status_map.py  quality_report.json  tests/
 
-cat /tmp/grace_cashfree_run1/lens/connectors/cashfree/quality_report.json | python -m json.tool
+cat lens/connectors/cashfree/quality_report.json | python -m json.tool
 # {
 #   "total": 87,
 #   "passed": true,

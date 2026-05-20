@@ -136,8 +136,14 @@ def doctor() -> None:
 
 
 def _default_docs_dir(psp: str) -> Path:
-    """`connector_docs/<psp>/` under the repo root."""
-    return _repo_root() / "connector_docs" / psp
+    """`connector_docs/<psp>/` under the **current working directory**.
+
+    The expectation is that grace is invoked from inside the consumer repo
+    (e.g. Lens), so docs snapshots get versioned alongside the package they
+    produced — not inside Grace's own tree. Grace is a CLI tool the consumer
+    depends on, never the other way around.
+    """
+    return Path.cwd() / "connector_docs" / psp
 
 
 @main.command()
