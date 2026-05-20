@@ -56,11 +56,51 @@ reading the rulebook, then re-check against this list before you finish.
    ✓ `async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse:`
    ✗ `def create_order(self, request): ...`
 
-4. DOMAIN TYPES use the **exact** field names from `domain_types.md`:
+3a. THE CLASS DECLARES ALL FOUR ABSTRACT `@property`s. If any of these are
+    missing, `ConnectorFactory.register(...)` at import time raises
+    `Can't instantiate abstract class <Psp> without an implementation for
+    abstract methods 'base_url', 'name', 'supported_methods',
+    'supports_idempotency_key'` and your tests can't even collect. Write
+    ALL FOUR — they're cheap one-liners:
+
+      @property
+      def name(self) -> str:
+          return "<psp>"                            # MUST match the registry key
+
+      @property
+      def base_url(self) -> str:
+          return "https://sandbox.<psp>.com/..."    # PSP's sandbox base URL
+
+      @property
+      def supported_methods(self) -> set[PaymentMethod]:
+          return {{PaymentMethod.CARD, PaymentMethod.UPI}}   # subset PSP supports
+
+      @property
+      def supports_idempotency_key(self) -> bool:
+          return True                               # True iff the PSP honors the header
+
+    These come BEFORE the async flow methods in `class <Psp>(Connector):`.
+
+4. DOMAIN TYPES use the **exact** field names from `domain_types.md`. Pydantic
+   models are `extra="forbid"` — invented fields error out at construction.
    - `request.amount.minor_units: int`            (NOT `.value`, NOT `.amount`)
    - `request.amount.currency: Currency`
    - `request.customer_id: str | None`            (NOT `request.customer.id`, NOT a nested object)
    - `request.idempotency_key: str | None`
+   - `request.merchant_id: str`                   (required — comes from ConnectorConfig)
+   - `request.return_url: HttpUrl`                (required for create_order)
+   - `request.order_id: str`                      (Orbit's UUID — required)
+
+   Response fields are locked. Do NOT invent extras (`raw`, `connector_order_id`, etc.).
+   - `CreateOrderResponse`:  psp_order_id, payment_link, status, expires_at
+   - `SyncPaymentResponse`:  psp_order_id, status, paid_amount, attempts
+   - `RefundResponse`:       psp_refund_id, status, refunded_amount
+   - `SyncRefundResponse`:   psp_refund_id, status, refunded_amount, failure_reason
+   - `PaymentAttempt`:       psp_payment_id, status, method_used, amount,
+                             failure_code, failure_reason, attempted_at, raw
+
+   ✓ `return CreateOrderResponse(psp_order_id=..., payment_link=..., status=OrderStatus.CREATED)`
+   ✗ `return CreateOrderResponse(order_id=..., connector_order_id=..., raw={{...}})`  ← will fail mypy AND Pydantic
    ✗ No `float()` conversions anywhere on the domain surface (ground rule 10).
 
 5. `__init__.py` MUST do two things at module scope:
@@ -109,14 +149,18 @@ reading the rulebook, then re-check against this list before you finish.
 
 Before you exit, grep your own output for these and verify each one matches:
 
-  $ grep -E "^class [A-Z][a-z]+\\(Connector\\)" connector.py     # exactly one match
-  $ grep "from lens.connector import Connector" connector.py      # present
-  $ grep "ConnectorFactory.register" __init__.py                   # present
-  $ grep "requires_lens" __init__.py                               # present
-  $ grep "async def" connector.py                                  # six matches (5 flows + close)
-  $ grep "Maskable" auth.py                                        # at least once
-  $ grep "WEBHOOK_SIGNATURE_FAILED" connector.py                   # at least once
-  $ grep -E "Money|float\\(" connector.py models.py                # ZERO matches
+  $ grep -E "^class [A-Z][a-z]+\\(Connector\\)" connector.py        # exactly one match
+  $ grep "from lens.connector import Connector" connector.py         # present
+  $ grep "ConnectorFactory.register" __init__.py                      # present
+  $ grep "requires_lens" __init__.py                                  # present
+  $ grep -c "async def" connector.py                                  # >= 6 (5 flows + close)
+  $ grep -c "@property" connector.py                                  # >= 4 (name, base_url, supported_methods, supports_idempotency_key)
+  $ grep -E "def name|def base_url|def supported_methods|def supports_idempotency_key" connector.py  # 4 matches
+  $ grep "Maskable" auth.py                                           # at least once
+  $ grep "WEBHOOK_SIGNATURE_FAILED" connector.py                      # at least once
+  $ grep -E "Money|float\\(" connector.py models.py                   # ZERO matches
+  $ grep -E "psp_order_id|psp_refund_id|psp_payment_id" connector.py  # at least one of each
+  $ grep -E "\\border_id=|\\bconnector_order_id=|\\braw=" connector.py # ZERO (don't invent response fields)
 
 ╔══════════════════════════════════════════════════════════════════════╗
 ║ CONTEXT FILES                                                         ║

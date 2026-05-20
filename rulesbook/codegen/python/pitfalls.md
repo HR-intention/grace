@@ -12,6 +12,52 @@ Every deviation listed here costs rubric points. The fixes are concrete and unam
 
 The class name is the PSP name in PascalCase, **no suffix**. The registry key (the first arg to `ConnectorFactory.register`) is the same string in lowercase. The rubric's public-surface scorer does a case-insensitive name match against the PSP name — `connector.py: no class named <psp>` is a 4-point dock per missing element.
 
+## 1b. The four abstract `@property`s
+
+`Connector` has four abstract `@property` declarations on top of the six async methods. **All ten must be present**, or `ConnectorFactory.register(...)` raises at import time with:
+
+```
+Can't instantiate abstract class Cashfree without an implementation for abstract methods
+  'base_url', 'name', 'supported_methods', 'supports_idempotency_key'
+```
+
+and your tests can't even collect — `test_coverage` lands at 0/25.
+
+```python
+# CORRECT shape — properties FIRST, then __init__, then async methods.
+class Cashfree(Connector):
+    @property
+    def name(self) -> str:
+        return "cashfree"
+
+    @property
+    def base_url(self) -> str:
+        return "https://sandbox.cashfree.com/pg"
+
+    @property
+    def supported_methods(self) -> set[PaymentMethod]:
+        return {PaymentMethod.CARD, PaymentMethod.UPI}
+
+    @property
+    def supports_idempotency_key(self) -> bool:
+        return True
+
+    def __init__(self, config: ConnectorConfig) -> None: ...
+
+    async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse: ...
+    # ... and the other four async methods
+```
+
+```python
+# WRONG — properties missing. Class is concrete by line count but
+# abstract by Python; instantiation fails.
+class Cashfree(Connector):
+    def __init__(self, config: ConnectorConfig) -> None: ...
+
+    async def create_order(self, request): ...
+    # ... no @property at all
+```
+
 ## 2. Import paths
 
 | ✗ Wrong | ✓ Right |
@@ -47,6 +93,33 @@ The locked `CreateOrderRequest` (and siblings) have a **flat** field set inherit
 | `float(request.amount.value)` | `Decimal(request.amount.minor_units) / 100` (only inside the wire-level builder, never crossing back out) |
 
 If the PSP requires a customer email/phone/name and the domain request doesn't carry it, **pass a placeholder or omit the field** — do NOT invent additional request fields. Orbit owns the customer record.
+
+## 4b. Response field names are locked
+
+Every domain response model has `extra="forbid"` — passing a keyword arg the model doesn't declare raises a Pydantic `ValidationError` and mypy will refuse to compile because it's `[call-arg]`. Don't invent fields.
+
+```python
+# CORRECT — exactly the locked fields:
+return CreateOrderResponse(
+    psp_order_id=psp_resp.cf_order_id,
+    payment_link=psp_resp.payment_link,
+    status=OrderStatus.CREATED,
+    expires_at=psp_resp.order_expiry_time,
+)
+```
+
+```python
+# WRONG — `order_id`, `connector_order_id`, `raw` are not on CreateOrderResponse:
+return CreateOrderResponse(
+    order_id=...,                  # ← no such field; mypy [attr-defined]
+    connector_order_id=...,        # ← invented
+    raw={...},                     # ← not on the response (raw lives on PaymentAttempt only)
+)
+```
+
+Same applies to `RefundResponse`, `SyncPaymentResponse`, `SyncRefundResponse`. The locked fields are listed in `domain_types.md` — paste-from-spec, don't paraphrase.
+
+`raw: dict[str, Any]` exists on `PaymentAttempt` (for debug/replay), and `raw_payload` on `WebhookEvent`. Those are the ONLY two places. Do not add it to other responses.
 
 ## 5. `__init__.py` self-registration
 

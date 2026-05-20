@@ -58,6 +58,12 @@ REQUIRED_FLOW_METHODS = {
     "handle_webhook",
     "close",
 }
+REQUIRED_PROPERTIES = {
+    "name",
+    "base_url",
+    "supported_methods",
+    "supports_idempotency_key",
+}
 
 
 def _score_marker(output_dir: Path) -> Dimension:
@@ -123,6 +129,25 @@ def _score_public_surface(ctx: GenerationContext, output_dir: Path) -> Dimension
                 missing = REQUIRED_FLOW_METHODS - method_names
                 if missing:
                     issues.append(f"connector class missing methods: {sorted(missing)}")
+
+                # Detect missing @property declarations. An abstract Connector
+                # with these missing fails to instantiate at register-time,
+                # so test_coverage collapses to 0 — surface it here instead
+                # of waiting for pytest collection to blow up.
+                property_names: set[str] = set()
+                for member in class_node.body:
+                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        for dec in member.decorator_list:
+                            # `@property` is an ast.Name.
+                            if isinstance(dec, ast.Name) and dec.id == "property":
+                                property_names.add(member.name)
+                                break
+                missing_props = REQUIRED_PROPERTIES - property_names
+                if missing_props:
+                    issues.append(
+                        f"connector class missing @property declarations: "
+                        f"{sorted(missing_props)}"
+                    )
 
     init_py = output_dir / "__init__.py"
     if init_py.is_file():
