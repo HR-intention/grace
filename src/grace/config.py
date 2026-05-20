@@ -12,7 +12,7 @@ from grace.errors import GraceError, GraceErrorReason
 class ClaudeCodeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     cli_path: Path | None = None
-    timeout_s: float = 1800.0
+    timeout_s: float = 6000.0
 
 
 class QualityConfig(BaseModel):

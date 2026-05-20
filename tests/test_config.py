@@ -11,7 +11,7 @@ from grace.errors import GraceError, GraceErrorReason
 def test_default_config_when_file_absent(tmp_path: Path) -> None:
     cfg = load_config(config_path=tmp_path / "missing.yaml")
     assert cfg.claude_code.cli_path is None
-    assert cfg.claude_code.timeout_s == 1800
+    assert cfg.claude_code.timeout_s == 6000
     assert cfg.quality.mypy_strict is True
     assert cfg.quality.min_coverage_pct == 80
     assert cfg.quality.min_rubric_score == 60

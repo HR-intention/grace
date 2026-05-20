@@ -18,7 +18,7 @@ class ClaudeCodeRunner:
     """
 
     cli_path: Path | None = None
-    timeout_s: float = 1800.0
+    timeout_s: float = 6000.0
 
     def _resolve_binary(self) -> Path:
         if self.cli_path is not None:
@@ -101,9 +101,18 @@ class ClaudeCodeRunner:
         stderr_text = stderr.decode(errors="replace")
         stdout_text = stdout.decode(errors="replace")
         if rc != 0:
+            # `claude -p` writes 401 auth failures to stdout, not stderr — scan both
+            # streams + watch for the JSON `authentication_error` pattern.
+            combined = (stderr_text + "\n" + stdout_text).lower()
+            looks_like_auth = (
+                "authentication_error" in combined
+                or "401" in combined
+                or "auth" in combined
+                or "login" in combined
+            )
             reason = (
                 GraceErrorReason.CLAUDE_CODE_NOT_AUTHENTICATED
-                if "auth" in stderr_text.lower() or "login" in stderr_text.lower()
+                if looks_like_auth
                 else GraceErrorReason.CLAUDE_CODE_FAILED
             )
             raise GraceError(reason=reason, detail=stderr_text.strip() or stdout_text.strip())
