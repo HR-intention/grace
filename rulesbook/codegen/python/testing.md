@@ -264,6 +264,82 @@ The connector returns the PSP-side id from the response body. The input `psp_ref
 on the request is just "which refund to look up"; the response is "what the PSP says
 about that refund". They are different IDs in this test pattern.
 
+### 6. Mock-response JSON must satisfy your own Pydantic wire models
+
+The connector parses the mock's response JSON via Pydantic models in `models.py`. Those models default to `extra="forbid"` and every field declared without a default is **required**. If the test handler returns a response body missing those fields, Pydantic raises `ValidationError` inside the connector method, and the test fails with a long traceback like:
+
+```
+pydantic_core._pydantic_core.ValidationError: 2 validation errors for CashfreeCreateOrderResponse
+  payment_session_id: Field required
+  cf_order_id: Field required
+```
+
+```python
+# WRONG — mock body missing required Cashfree response fields:
+def handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={"order_status": "ACTIVE"})    # missing 5 required fields
+```
+
+```python
+# CORRECT — every required field on the wire model is present:
+def handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={
+        "cf_order_id": "2149460581",
+        "order_id": "orbit-uuid-123",
+        "order_status": "ACTIVE",
+        "order_amount": 500.0,
+        "order_currency": "INR",
+        "payment_session_id": "session_abc123",
+        "order_expiry_time": "2026-06-01T12:00:00+05:30",
+    })
+```
+
+When writing the test, copy the response shape from the PSP's example response in the docs (or your own wire model's field list) into the mock JSON. Don't free-hand a minimal subset.
+
+### 7. One payment wire model, two contexts
+
+Cashfree (and most PSPs) return the same payment shape on `/orders/{id}/payments` (sync_payment) and inside webhook payloads (`data.payment`). Modeling these as two SEPARATE Pydantic classes (`CashfreePayment` and `CashfreeWebhookPayment`) means a helper like `_payment_to_attempt(p: CashfreePayment)` can't be reused from `handle_webhook` — mypy flags `incompatible type`.
+
+```python
+# WRONG — two parallel models for the same wire shape, helper is monomorphic:
+class CashfreePayment(BaseModel):
+    cf_payment_id: int
+    payment_status: str
+    payment_amount: float
+    ...
+
+class CashfreeWebhookPayment(BaseModel):    # same fields, different class
+    cf_payment_id: int
+    payment_status: str
+    payment_amount: float
+    ...
+
+def _payment_to_attempt(p: CashfreePayment) -> PaymentAttempt: ...
+
+# In handle_webhook:
+attempt = _payment_to_attempt(psp_event.data.payment)   # CashfreeWebhookPayment — type error
+```
+
+```python
+# CORRECT — single CashfreePayment, both sync_payment AND the webhook payload nest it:
+class CashfreePayment(BaseModel):
+    cf_payment_id: int
+    payment_status: str
+    ...
+
+class CashfreeWebhookData(BaseModel):
+    payment: CashfreePayment | None = None
+    order: CashfreeOrder | None = None
+    refund: CashfreeRefund | None = None
+
+class CashfreeWebhookPayload(BaseModel):
+    type: str
+    event_id: str
+    data: CashfreeWebhookData
+```
+
+Reuse the single payment model across contexts unless the PSP genuinely returns different shapes (rare). The same principle applies to refunds (`CashfreeRefund` covers sync_refund + webhook `data.refund`).
+
 ## Coverage discipline
 
 - Every branch in `connector.py` should be exercised by at least one test (happy + error path for each flow; signature-fail + at least two event types for the webhook).

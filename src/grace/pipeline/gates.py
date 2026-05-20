@@ -61,7 +61,14 @@ def _parse_pytest_counts(stdout: str) -> dict[str, int]:
 
 
 def run_pytest_with_cov(*, target: Path) -> PytestReport:
-    """Invoke pytest with coverage on the target package; parse the JSON report."""
+    """Invoke pytest with coverage on the target package; parse the JSON report.
+
+    NOTE: we deliberately do NOT pass `-q`. Quiet mode suppresses pytest's
+    bottom summary line ("6 failed, 6 passed in 0.58s") when running under
+    pytest-cov with a configured fail_under threshold — making it impossible
+    to extract per-status counts from stdout. Without -q the summary is
+    always present and `_parse_pytest_counts` can do its job.
+    """
     json_report = target.parent / "_grace_coverage.json"
     cmd = [
         sys.executable,
@@ -71,7 +78,6 @@ def run_pytest_with_cov(*, target: Path) -> PytestReport:
         str(target),
         "--cov-report",
         f"json:{json_report}",
-        "-q",
         str(target),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
