@@ -192,7 +192,14 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
         runner = ClaudeCodeRunner(
             cli_path=cfg.claude_code.cli_path, timeout_s=cfg.claude_code.timeout_s
         )
+        click.echo(
+            f"→ Spawning claude -p for {psp} (this can take several minutes; "
+            f"timeout = {int(cfg.claude_code.timeout_s)}s). "
+            f"Output streams below; quality gates run after exit."
+        )
+        click.echo("─" * 78)
         asyncio.run(_run_pipeline(ctx=ctx, runner=runner, hooks=PipelineHooks(run_gates=True)))
+        click.echo("─" * 78)
         _save_last_run(psp=psp, source=source, output=out)
         click.echo(f"OK: wrote {out}")
     except GraceError as e:
