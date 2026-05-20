@@ -66,6 +66,9 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
     """Run mypy + pytest + rubric. Raise GraceError if any gate fails."""
     from grace.quality_rubric import RubricReport, score_rubric
 
+    # The runner is supposed to materialize this directory but defend against the
+    # zero-files case (e.g. a stub runner in tests, or a Claude run that wrote nothing).
+    result.output_dir.mkdir(parents=True, exist_ok=True)
     mypy_report = run_mypy(target=result.output_dir, strict=True)
     pytest_report = run_pytest_with_cov(target=result.output_dir)
     rubric: RubricReport = score_rubric(
