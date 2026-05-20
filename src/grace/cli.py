@@ -187,6 +187,14 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
         source = str(default)
 
     out = output or (Path.cwd() / "lens" / "connectors" / psp)
+
+    # Persist the invocation args BEFORE running the pipeline so `grace
+    # regenerate <psp>` can replay them even when the pipeline raises
+    # (typically QUALITY_GATE_FAILED during rulebook iteration). The whole
+    # point of `regenerate` is to retry after a failed run; saving only on
+    # success defeated that.
+    _save_last_run(psp=psp, source=source, output=out)
+
     try:
         ctx = assemble_context(
             psp_name=psp,
@@ -208,7 +216,6 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
         click.echo("─" * 78)
         asyncio.run(_run_pipeline(ctx=ctx, runner=runner, hooks=PipelineHooks(run_gates=True)))
         click.echo("─" * 78)
-        _save_last_run(psp=psp, source=source, output=out)
         click.echo(f"OK: wrote {out}")
 
         # Auto-refresh the consumer-side docs catalog so llms.txt stays in sync

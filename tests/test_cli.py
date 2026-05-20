@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -180,6 +181,37 @@ def test_generate_prints_actionable_hint_on_401(
     assert "API Error: 401" in out
     # The README pointer / GitHub issue tag is mentioned for further reading.
     assert "anthropics/claude-code" in out
+
+
+def test_generate_records_last_run_even_when_pipeline_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pipeline that raises (e.g., QUALITY_GATE_FAILED) must still leave
+    a recoverable last_run.json so `grace regenerate` can replay the args."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    async def fake_run_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
+        raise GraceError(reason=GraceErrorReason.QUALITY_GATE_FAILED, detail="55 < 60")
+
+    monkeypatch.setattr("grace.cli._run_pipeline", fake_run_pipeline)
+
+    spec = tmp_path / "docs"
+    spec.mkdir()
+    (spec / "x.md").write_text("# x")
+
+    result = CliRunner().invoke(
+        main,
+        ["generate", "cashfree", "--from", str(spec), "--output", str(tmp_path / "out")],
+    )
+    # Pipeline failed → non-zero exit, but the last-run record IS written.
+    assert result.exit_code != 0
+    last_run = fake_home / ".grace" / "last_run.json"
+    assert last_run.is_file()
+    data = json.loads(last_run.read_text())
+    assert data["psp"] == "cashfree"
+    assert data["source"] == str(spec)
 
 
 def test_generate_prints_hint_on_timeout(
