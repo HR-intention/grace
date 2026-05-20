@@ -174,11 +174,24 @@ async def _tee(
     `formatter` if provided; the formatter's return value (or the raw chunk
     if no formatter) is forwarded to `sink`. A formatter returning None means
     "swallow this event silently".
+
+    Robust against oversized lines: if a single line exceeds the
+    StreamReader's `limit`, readline raises ValueError. We surface a marker
+    in the sink and continue — losing that one event is far better than
+    aborting the whole stream and leaving the user staring at a traceback.
     """
     if stream is None:
         return
     while True:
-        chunk = await stream.readline()
+        try:
+            chunk = await stream.readline()
+        except ValueError:
+            # A single line was longer than the StreamReader's limit.
+            # The reader has already discarded the offending line; we just
+            # tell the user and move on so the rest of the run is still
+            # visible.
+            sink("[grace] (oversized stream event skipped — readline limit overrun)\n")
+            continue
         if not chunk:
             return
         text = chunk.decode(errors="replace")
@@ -186,6 +199,14 @@ async def _tee(
         formatted = formatter(text) if formatter is not None else text
         if formatted is not None:
             sink(formatted)
+
+
+# Generous stdout limit for the claude subprocess. Real generations embed
+# whole files (~80 KB+ markdown sources) in tool_result events as JSON-escaped
+# strings — the default 64 KiB asyncio limit fires almost immediately. 64 MB
+# is more than enough for any single conceivable event and costs nothing when
+# unused.
+_SUBPROCESS_LINE_LIMIT = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -264,6 +285,9 @@ class ClaudeCodeRunner:
         # event per tool call / message chunk, which we parse into live
         # progress lines via `format_stream_event`. Without these flags claude
         # only writes its final text at exit — minutes of silence for the user.
+        # `limit` raises the StreamReader's per-line cap above the asyncio
+        # default 64 KiB so tool_result events embedding whole markdown files
+        # don't trip a readline ValueError.
         proc = await asyncio.create_subprocess_exec(
             str(binary),
             "-p",
@@ -276,6 +300,7 @@ class ClaudeCodeRunner:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=_SUBPROCESS_LINE_LIMIT,
         )
 
         # Feed the prompt and close stdin so claude doesn't wait for more input.

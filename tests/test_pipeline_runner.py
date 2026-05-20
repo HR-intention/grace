@@ -272,6 +272,61 @@ def test_format_stream_event_tool_use_write_includes_size() -> None:
     assert "Write(/tmp/connector.py, 11B)" in out
 
 
+def test_generate_handles_oversized_line_without_crash(
+    monkeypatch: pytest.MonkeyPatch, fake_ctx: GenerationContext, tmp_path: Path
+) -> None:
+    """A readline ValueError on one oversized event must not kill the stream;
+    the rest of the run should still flow through."""
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\nexit 0")
+    binary.chmod(0o755)
+    monkeypatch.setattr(shutil, "which", lambda _: str(binary))
+
+    # A custom reader that raises ValueError on the second readline (mimicking
+    # asyncio's behaviour for a line that overruns the limit), then yields
+    # the next event normally.
+    class _LimitOverrunReader:
+        def __init__(self, lines: list[bytes]) -> None:
+            self._lines = lines
+            self._idx = 0
+
+        async def readline(self) -> bytes:
+            if self._idx >= len(self._lines):
+                return b""
+            item = self._lines[self._idx]
+            self._idx += 1
+            if item == b"<RAISE>":
+                raise ValueError("Separator is not found, and chunk exceed the limit")
+            return item
+
+    class _Proc(_FakeProc):
+        pass
+
+    proc = _Proc(stdout_bytes=b"", stderr_bytes=b"", returncode=0)
+    proc.stdout = _LimitOverrunReader(  # type: ignore[assignment]   # test stub
+        [
+            b'{"type":"system","subtype":"init","model":"x","tools":[]}\n',
+            b"<RAISE>",
+            b'{"type":"result","subtype":"success","duration_ms":1,"total_cost_usd":0.0}\n',
+        ]
+    )
+
+    async def _exec(*a: Any, **k: Any) -> _Proc:
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _exec)
+
+    captured: list[str] = []
+    runner = ClaudeCodeRunner(stdout_sink=captured.append, stderr_sink=lambda _t: None)
+    # Must not raise.
+    asyncio.run(runner.generate(fake_ctx))
+
+    joined = "".join(captured)
+    assert "session started" in joined            # event before the overrun came through
+    assert "oversized stream event skipped" in joined  # marker landed
+    assert "done" in joined                        # event after the overrun came through
+
+
 def test_generate_streams_stdout_to_sink_live(
     monkeypatch: pytest.MonkeyPatch, fake_ctx: GenerationContext, tmp_path: Path
 ) -> None:
