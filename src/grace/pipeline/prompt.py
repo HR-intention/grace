@@ -210,6 +210,28 @@ Before you exit, grep your own output for these and verify each one matches:
         | head -3                                                                 # must include merchant_id= and order_id=
                             # Every request needs both RequestCommon fields supplied.
 
+    $ grep -cE "^(async )?def test_[a-z_]+\\(.*\\) ->" tests/*.py                  # every test fn returns -> None
+                            # mypy --strict requires explicit -> None on async def test_x():
+
+  CONSTRUCTOR + WEBHOOK SHAPE:
+    $ grep -nE "\\.expose\\(\\)" connector.py | grep -E "def __init__|self\\._client = httpx" -A 5 -B 2  # ZERO calls to .expose() in __init__ block
+                            # __init__ stores config, builds client. NEVER call .expose() there —
+                            # ConnectorFactory.register passes a stub_config with None creds at
+                            # register time. Build headers inside the flow methods at HTTP call time.
+
+    $ grep -E "async def handle_webhook\\(self, raw_payload: bytes, headers: dict\\[str, str\\]\\) -> WebhookEvent:" connector.py  # exactly one match
+                            # Signature must match the ABC verbatim — no renaming, no widening.
+
+    $ grep -E "WebhookEvent\\(" connector.py | grep -v "psp_event_id" | wc -l    # ZERO
+                            # Every WebhookEvent(...) construction must include psp_event_id=.
+
+    $ grep -E "WebhookEvent\\(" connector.py | grep -v "raw_payload" | wc -l     # ZERO
+                            # Every WebhookEvent(...) construction must include raw_payload=.
+
+    $ grep -E "PaymentAttempt\\(.*amount=[0-9]+|PaymentAttempt\\(.*amount=request\\." connector.py  # ZERO
+                            # PaymentAttempt.amount is Amount|None (the ONE exception to int-minor-units).
+                            # Wrap raw int as Amount(minor_units=N, currency=Currency.X).
+
   If ANY check above has a non-empty match (when it should be ZERO) or a
   missing match (when it should be present), fix it before writing the
   final file out.

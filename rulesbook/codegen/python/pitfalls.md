@@ -340,6 +340,126 @@ __all__ = ["Cashfree"]
 
 The rubric's public-surface scorer greps for both literal strings; the second style scores 8/20 instead of 20/20.
 
+## 5b. `__init__` must NOT touch credentials — defer to HTTP call time
+
+`ConnectorConfig.secret_key`, `webhook_secret`, `base_url_override`, `additional` are all **`Optional`**. At register-time `ConnectorFactory.register()` instantiates your class with a stub config where these may be `None` to verify it's instantiable. If `__init__` calls `.expose()` (or any `.method`) on an Optional credential, it crashes with `AttributeError: 'NoneType' object has no attribute 'expose'` — and **every test fails to collect**, dragging `test_coverage` to 0/25.
+
+```python
+# WRONG — builds headers eagerly in __init__, crashes on stub_config:
+def __init__(self, config: ConnectorConfig) -> None:
+    self._config = config
+    self._client = httpx.AsyncClient(
+        base_url=self.base_url,
+        headers={
+            "x-client-id": config.api_key.expose(),
+            "x-client-secret": config.secret_key.expose(),   # ← .expose() on None
+            "x-webhook-secret": config.webhook_secret.expose(),  # ← .expose() on None
+        },
+    )
+```
+
+```python
+# CORRECT — defer header building to call sites; __init__ just stores config + builds client.
+def __init__(self, config: ConnectorConfig) -> None:
+    self._config = config
+    self._client = httpx.AsyncClient(
+        base_url=str(config.base_url_override) if config.base_url_override else self.base_url,
+        timeout=30.0,
+    )
+
+async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse:
+    # Build headers HERE (called only with a real config that has real creds).
+    headers = build_auth_headers(self._config)
+    if request.idempotency_key and self.supports_idempotency_key:
+        headers["x-idempotency-key"] = request.idempotency_key
+    ...
+```
+
+`build_auth_headers` (in `auth.py`) is where Optional handling happens. It can:
+- Assume creds are present (the runtime caller will have them) and access `.expose()` directly.
+- Or defensively check `if config.secret_key is None: raise ConnectorError(reason=ConnectorErrorReason.INVALID_REQUEST, psp_message="secret_key required for <psp>")`.
+
+Both are fine. What's NOT fine is calling `.expose()` in `__init__`.
+
+## 5c. `handle_webhook` signature must match the ABC exactly
+
+LSP violation: subclass methods can widen the args but not narrow them. The ABC declares:
+
+```python
+async def handle_webhook(
+    self, raw_payload: bytes, headers: dict[str, str]
+) -> WebhookEvent:
+```
+
+```python
+# WRONG — narrowed arg types violate LSP, mypy errors with [override]:
+async def handle_webhook(
+    self, raw_payload: str, headers: dict             # ← str instead of bytes, raw dict
+) -> WebhookEvent: ...
+
+async def handle_webhook(
+    self, payload: bytes, headers: Mapping[str, str]   # ← renamed param
+) -> WebhookEvent: ...
+```
+
+```python
+# CORRECT — copy the ABC signature verbatim:
+async def handle_webhook(
+    self, raw_payload: bytes, headers: dict[str, str]
+) -> WebhookEvent: ...
+```
+
+The arg names (`raw_payload`, `headers`) and types (`bytes`, `dict[str, str]`) and return type (`WebhookEvent`) must match. No widening, no narrowing, no renaming.
+
+## 5d. `WebhookEvent` required fields
+
+```python
+class WebhookEvent(BaseModel):
+    event_type: WebhookEventType        # REQUIRED
+    psp_event_id: str                   # REQUIRED — for Orbit's dedup
+    psp_order_id: str | None = None
+    attempt: PaymentAttempt | None = None
+    refund:  RefundEvent     | None = None
+    raw_payload: dict[str, Any]         # REQUIRED — the parsed PSP payload as dict
+```
+
+Every `WebhookEvent(...)` you construct must pass `event_type=`, `psp_event_id=`, AND `raw_payload=`. The other two (`attempt`, `refund`) are optional and you populate whichever branch matches the event type.
+
+```python
+# WRONG — psp_event_id and raw_payload are required:
+return WebhookEvent(
+    event_type=WebhookEventType.PAYMENT_SUCCESS,
+    attempt=attempt,
+)
+```
+
+```python
+# CORRECT:
+return WebhookEvent(
+    event_type=WebhookEventType.PAYMENT_SUCCESS,
+    psp_event_id=psp_event.event_id,
+    psp_order_id=psp_event.data.order.cf_order_id,
+    attempt=attempt,
+    raw_payload=psp_event.model_dump(),
+)
+```
+
+## 5e. Tests need `-> None` annotations under `mypy --strict`
+
+```python
+# WRONG — under mypy --strict, every def needs a return type:
+async def test_create_order():
+    ...
+```
+
+```python
+# CORRECT:
+async def test_create_order() -> None:
+    ...
+```
+
+The same applies to all helper functions inside test files (`_make_request()`, `_handler()`, fixture functions). Every `def` and `async def` needs `-> SomeType`.
+
 ## 6. Credentials in `auth.py`
 
 ```python
