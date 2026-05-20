@@ -147,90 +147,112 @@ reading the rulebook, then re-check against this list before you finish.
 ║ POST-GENERATION SELF-CHECK                                            ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-Before you exit, grep your own output for these and verify each one matches:
+Before you exit, run these checks against your own output. Use the Grep
+tool with `path` set to the OUTPUT DIRECTORY (a directory, not a single
+file) and `glob` to filter — `Grep(pattern=X, path=<cwd>, glob="*.py")`
+or `Grep(pattern=X, path=<cwd>/tests, glob="*.py")`. Passing a single
+file path to Grep returns "0 files found" even when the pattern is
+present, which gives misleadingly clean results.
+
+Each line below is a `pattern, expected match count or grep result` pair.
+If anything disagrees, fix it before exiting.
 
   STRUCTURE:
-    $ grep -E "^class [A-Z][a-z]+\\(Connector\\)" connector.py        # exactly one match
-    $ grep "from lens.connector import Connector" connector.py         # present
-    $ grep "ConnectorFactory.register" __init__.py                      # present
-    $ grep "requires_lens" __init__.py                                  # present
-    $ grep -c "async def" connector.py                                  # >= 6 (5 flows + close)
-    $ grep -c "@property" connector.py                                  # >= 4
-    $ grep -E "def name|def base_url|def supported_methods|def supports_idempotency_key" connector.py  # 4 matches
+    Grep(pattern="^class [A-Z][a-z]+\\(Connector\\)", path=<cwd>, glob="connector.py", output_mode="content")
+        → exactly one match
+    Grep(pattern="from lens.connector import Connector", path=<cwd>, glob="connector.py")
+        → present
+    Grep(pattern="ConnectorFactory.register", path=<cwd>, glob="__init__.py")
+        → present
+    Grep(pattern="requires_lens", path=<cwd>, glob="__init__.py")
+        → present
+    Grep(pattern="async def", path=<cwd>, glob="connector.py", output_mode="count")
+        → >= 6 (5 flows + close)
+    Grep(pattern="@property", path=<cwd>, glob="connector.py", output_mode="count")
+        → >= 4
+    Grep(pattern="def (name|base_url|supported_methods|supports_idempotency_key)\\(", path=<cwd>, glob="connector.py", output_mode="content")
+        → 4 matches
 
   PII + ERRORS:
-    $ grep "Maskable" auth.py                                           # at least once
-    $ grep "WEBHOOK_SIGNATURE_FAILED" connector.py                      # at least once
-    $ grep -E "Money|float\\(" connector.py models.py                   # ZERO matches
+    Grep(pattern="Maskable", path=<cwd>, glob="auth.py")
+        → at least one match
+    Grep(pattern="WEBHOOK_SIGNATURE_FAILED", path=<cwd>, glob="connector.py")
+        → at least one match
+    Grep(pattern="Money|float\\(", path=<cwd>, glob="*.py")
+        → ZERO matches
 
   LOCKED FIELD NAMES (every one of these has been gotten wrong by past
-  generations — verify ALL six lines in your own output before exiting):
+  generations — verify ALL of these in your own output before exiting):
 
-    $ grep -E "config\\.credentials|config\\.merchant_id" connector.py auth.py  # ZERO
-                            # ConnectorConfig has api_key/secret_key/webhook_secret;
-                            # merchant_id lives on requests, not config.
+    Grep(pattern="config\\.credentials|config\\.merchant_id", path=<cwd>, glob="*.py")
+        → ZERO matches
+        ConnectorConfig has api_key/secret_key/webhook_secret; merchant_id lives on requests.
 
-    $ grep -E "\\bpayment_attempt=|\\brefund_event=" connector.py tests/*.py   # ZERO
-                            # WebhookEvent fields are `attempt` and `refund`.
+    Grep(pattern="\\bpayment_attempt=|\\brefund_event=", path=<cwd>, glob="*.py")
+        → ZERO matches
+        WebhookEvent fields are `attempt` and `refund`.
 
-    $ grep -E "WebhookEvent\\(.*payment_attempt|WebhookEvent\\(.*refund_event" *.py  # ZERO
+    Grep(pattern="\\.payment_attempt\\b|\\.refund_event\\b", path=<cwd>/tests, glob="*.py")
+        → ZERO matches
+        event.attempt / event.refund, never the longer names.
 
-    $ grep -E "\\.payment_attempt\\b|\\.refund_event\\b" tests/*.py             # ZERO
-                            # event.attempt / event.refund, never the longer names.
+    Grep(pattern="RefundRequest\\(.*\\bamount=", path=<cwd>, glob="*.py")
+        → ZERO matches
+        RefundRequest has amount_to_refund: int|None; no `amount` field.
 
-    $ grep -E "RefundRequest\\(.*\\bamount=" connector.py tests/*.py            # ZERO
-                            # RefundRequest has amount_to_refund: int|None; no `amount` field.
+    Grep(pattern="SyncRefundRequest\\(.*\\brefund_id=|SyncRefundRequest\\(.*\\bpsp_order_id=", path=<cwd>, glob="*.py")
+        → ZERO matches
+        SyncRefundRequest takes only psp_refund_id + RequestCommon.
 
-    $ grep -E "SyncRefundRequest\\(.*\\brefund_id=|SyncRefundRequest\\(.*\\bpsp_order_id=" \\
-        connector.py tests/*.py                                                  # ZERO
-                            # SyncRefundRequest takes only psp_refund_id + RequestCommon.
+    Grep(pattern="RefundResponse\\(.*refunded_amount=Amount|SyncRefundResponse\\(.*refunded_amount=Amount", path=<cwd>, glob="*.py")
+        → ZERO matches
+        refunded_amount is int (minor units), never Amount.
 
-    $ grep -E "RefundResponse\\(.*refunded_amount=Amount|SyncRefundResponse\\(.*refunded_amount=Amount" \\
-        connector.py                                                              # ZERO
-                            # refunded_amount is int (minor units), never Amount.
+    Grep(pattern="SyncPaymentResponse\\(.*paid_amount=Amount", path=<cwd>, glob="connector.py")
+        → ZERO matches
+        paid_amount is int (minor units), never Amount.
 
-    $ grep -E "SyncPaymentResponse\\(.*paid_amount=Amount" connector.py           # ZERO
-                            # paid_amount is int (minor units), never Amount.
+    Grep(pattern="PaymentAttempt\\(.*attempted_at=None", path=<cwd>, glob="*.py")
+        → ZERO matches
+        attempted_at is required, non-optional.
 
-    $ grep -E "PaymentAttempt\\(.*attempted_at=None" connector.py                 # ZERO
-                            # attempted_at is required, non-optional.
-
-    $ grep -E "\\border_id=[^,)]" connector.py | grep -v "request\\.order_id"     # ZERO matches
-                            # No invented order_id= kwarg on responses; pass psp_order_id.
-
-    $ grep -E "CreateOrderResponse\\(.*payment_link=str|payment_link=str\\(" connector.py  # ZERO
-                            # payment_link is HttpUrl. Coerce via HttpUrl(s) or use a typed
-                            # Pydantic field that returns HttpUrl directly.
+    Grep(pattern="CreateOrderResponse\\(.*payment_link=str|payment_link=str\\(", path=<cwd>, glob="connector.py")
+        → ZERO matches
+        payment_link is HttpUrl. Coerce via HttpUrl(s) or use a typed Pydantic field.
 
   TEST FIXTURES:
-    $ grep -E "ConnectorConfig\\(.*credentials=|ConnectorConfig\\(.*merchant_id=" tests/*.py   # ZERO
-                            # ConnectorConfig takes name=, api_key=, secret_key=, webhook_secret=.
+    Grep(pattern="ConnectorConfig\\(.*credentials=|ConnectorConfig\\(.*merchant_id=", path=<cwd>/tests, glob="*.py")
+        → ZERO matches
+        ConnectorConfig takes name=, api_key=, secret_key=, webhook_secret=.
 
-    $ grep -E "(CreateOrderRequest|SyncPaymentRequest|RefundRequest|SyncRefundRequest)\\(" tests/*.py \\
-        | head -3                                                                 # must include merchant_id= and order_id=
-                            # Every request needs both RequestCommon fields supplied.
+    Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests, glob="*.py", output_mode="content")
+        → every match line must end with ") -> None:"
+        mypy --strict requires explicit -> None on async def test_x():
 
-    $ grep -cE "^(async )?def test_[a-z_]+\\(.*\\) ->" tests/*.py                  # every test fn returns -> None
-                            # mypy --strict requires explicit -> None on async def test_x():
+    Grep(pattern="request\\.url\\.path == \"/", path=<cwd>/tests, glob="*.py")
+        → ZERO matches
+        Use request.url.path.endswith("/orders") — Cashfree's base has /pg prefix.
 
   CONSTRUCTOR + WEBHOOK SHAPE:
-    $ grep -nE "\\.expose\\(\\)" connector.py | grep -E "def __init__|self\\._client = httpx" -A 5 -B 2  # ZERO calls to .expose() in __init__ block
-                            # __init__ stores config, builds client. NEVER call .expose() there —
-                            # ConnectorFactory.register passes a stub_config with None creds at
-                            # register time. Build headers inside the flow methods at HTTP call time.
+    Grep(pattern="\\.expose\\(\\)", path=<cwd>, glob="connector.py", output_mode="content")
+        → ZERO matches (NOT in connector.py — only auth.py may call .expose()).
+        __init__ stores config, builds client. NEVER call .expose() there —
+        ConnectorFactory.register passes a stub_config with None creds at
+        register time. Build headers inside the flow methods at HTTP call time.
 
-    $ grep -E "async def handle_webhook\\(self, raw_payload: bytes, headers: dict\\[str, str\\]\\) -> WebhookEvent:" connector.py  # exactly one match
-                            # Signature must match the ABC verbatim — no renaming, no widening.
+    Grep(pattern="async def handle_webhook\\(", path=<cwd>, glob="connector.py", output_mode="content")
+        → exactly one match; the next line(s) must contain
+          `self, raw_payload: bytes, headers: dict[str, str]) -> WebhookEvent:`
+          Signature must match the ABC verbatim — no renaming, no widening.
 
-    $ grep -E "WebhookEvent\\(" connector.py | grep -v "psp_event_id" | wc -l    # ZERO
-                            # Every WebhookEvent(...) construction must include psp_event_id=.
+    Grep(pattern="WebhookEvent\\(", path=<cwd>, glob="connector.py", output_mode="content", -A=8)
+        → every WebhookEvent(...) block must contain both `psp_event_id=` and
+          `raw_payload=` within the next 8 lines. Required fields.
 
-    $ grep -E "WebhookEvent\\(" connector.py | grep -v "raw_payload" | wc -l     # ZERO
-                            # Every WebhookEvent(...) construction must include raw_payload=.
-
-    $ grep -E "PaymentAttempt\\(.*amount=[0-9]+|PaymentAttempt\\(.*amount=request\\." connector.py  # ZERO
-                            # PaymentAttempt.amount is Amount|None (the ONE exception to int-minor-units).
-                            # Wrap raw int as Amount(minor_units=N, currency=Currency.X).
+    Grep(pattern="PaymentAttempt\\(.*amount=[0-9]+|PaymentAttempt\\(.*amount=request\\.", path=<cwd>, glob="connector.py")
+        → ZERO matches
+        PaymentAttempt.amount is Amount|None (the ONE exception to int-minor-units).
+        Wrap raw int as Amount(minor_units=N, currency=Currency.X).
 
   If ANY check above has a non-empty match (when it should be ZERO) or a
   missing match (when it should be present), fix it before writing the

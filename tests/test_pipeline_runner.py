@@ -8,7 +8,11 @@ from typing import Any
 import pytest
 
 from grace.errors import GraceError, GraceErrorReason
-from grace.pipeline.runner import ClaudeCodeRunner, format_stream_event
+from grace.pipeline.runner import (
+    ClaudeCodeRunner,
+    _extract_result_stats,
+    format_stream_event,
+)
 from grace.pipeline.types import GenerationContext, PspDocs
 
 
@@ -251,6 +255,28 @@ def test_format_stream_event_skips_hook_events() -> None:
 def test_format_stream_event_skips_rate_limit() -> None:
     line = '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}'
     assert format_stream_event(line) is None
+
+
+def test_format_stream_event_skips_status_and_compact_boundary() -> None:
+    """New noisy event types observed in real claude runs."""
+    assert format_stream_event('{"type":"system","subtype":"status"}') is None
+    assert format_stream_event('{"type":"system","subtype":"compact_boundary"}') is None
+
+
+def test_extract_result_stats_pulls_cost_and_duration() -> None:
+    lines = [
+        '{"type":"assistant","message":{"content":[]}}\n',
+        '{"type":"result","subtype":"success","total_cost_usd":4.5968,"duration_ms":883500}\n',
+    ]
+    cost, dur = _extract_result_stats(lines)
+    assert cost == 4.5968
+    assert dur == 883500
+
+
+def test_extract_result_stats_returns_none_when_absent() -> None:
+    cost, dur = _extract_result_stats(['{"type":"system","subtype":"init"}\n'])
+    assert cost is None
+    assert dur is None
 
 
 def test_format_stream_event_unknown_type_emits_short_marker() -> None:

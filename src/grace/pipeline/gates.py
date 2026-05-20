@@ -171,11 +171,18 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
     rubric_payload = rubric.to_dict()
     # The nested rubric block keeps its own `passed` field (rubric-only ≥ 60).
     # Top-level `passed` reflects ALL gates — no more drift between report and CLI.
-    report_payload = {
+    run_stats: dict[str, float | int | None] = {}
+    if result.cost_usd is not None:
+        run_stats["cost_usd"] = round(result.cost_usd, 4)
+    if result.duration_ms is not None:
+        run_stats["duration_s"] = round(result.duration_ms / 1000.0, 1)
+    report_payload: dict[str, object] = {
         "passed": overall_passed,
         "gates": gates,
         "rubric": rubric_payload,
     }
+    if run_stats:
+        report_payload["run"] = run_stats
     (result.output_dir / "quality_report.json").write_text(
         _json.dumps(report_payload, indent=2)
     )

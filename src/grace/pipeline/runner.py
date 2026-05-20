@@ -59,13 +59,15 @@ def format_stream_event(raw_line: str) -> str | None:
     etype = event.get("type")
 
     # Noisy events that the user doesn't need to see (hook firings, rate-limit
-    # heartbeats, raw usage stats). Skip them silently — they're useful for
-    # post-mortem inspection (still kept in the raw buffer) but not for live
-    # progress.
+    # heartbeats, periodic status pings, compaction markers). Skip them
+    # silently — they're useful for post-mortem inspection (still kept in
+    # the raw buffer) but not for live progress.
     if etype == "rate_limit_event":
         return None
-    if etype == "system" and event.get("subtype", "").startswith("hook_"):
-        return None
+    if etype == "system":
+        subtype = event.get("subtype", "")
+        if subtype.startswith("hook_") or subtype in {"status", "compact_boundary"}:
+            return None
 
     if etype == "system" and event.get("subtype") == "init":
         model = event.get("model", "?")
@@ -116,6 +118,9 @@ def format_stream_event(raw_line: str) -> str | None:
         if event.get("is_error"):
             bits.append("ERROR")
         return f"[claude] ── done ({', '.join(bits)})\n"
+
+    # Default: skip benign system pings, surface anything else as a compact
+    # marker so unknowns don't silently vanish.
 
     # Unknown event type — surface just the type so the user knows something
     # arrived without dumping a potentially-huge JSON payload.
@@ -212,6 +217,27 @@ async def _tee(
 # is more than enough for any single conceivable event and costs nothing when
 # unused.
 _SUBPROCESS_LINE_LIMIT = 64 * 1024 * 1024
+
+
+def _extract_result_stats(stdout_lines: list[str]) -> tuple[float | None, int | None]:
+    """Scan the buffered JSONL events for the final `result` event and pull
+    `total_cost_usd` + `duration_ms` out of it. Returns (None, None) if the
+    event isn't present (e.g., claude crashed before emitting it)."""
+    for raw in reversed(stdout_lines):
+        stripped = raw.strip()
+        if not stripped or not stripped.startswith("{"):
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            cost = event.get("total_cost_usd")
+            dur = event.get("duration_ms")
+            cost_f = float(cost) if isinstance(cost, (int, float)) else None
+            dur_i = int(dur) if isinstance(dur, (int, float)) else None
+            return cost_f, dur_i
+    return None, None
 
 
 @dataclass(frozen=True)
@@ -386,10 +412,13 @@ class ClaudeCodeRunner:
             raise GraceError(reason=reason, detail=stderr_text.strip() or stdout_text.strip())
 
         files = sorted(p for p in context.output_dir.rglob("*.py"))
+        cost_usd, duration_ms = _extract_result_stats(stdout_buf)
         return GenerationResult(
             output_dir=context.output_dir,
             files_written=files,
             stdout=stdout_text,
             stderr=stderr_text,
             exit_code=rc,
+            cost_usd=cost_usd,
+            duration_ms=duration_ms,
         )

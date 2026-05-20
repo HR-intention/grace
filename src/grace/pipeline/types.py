@@ -41,3 +41,7 @@ class GenerationResult:
     stdout: str
     stderr: str
     exit_code: int
+    # Parsed from the final `result` JSONL event when --output-format
+    # stream-json is in use. Useful for tracking iteration cost.
+    cost_usd: float | None = None
+    duration_ms: int | None = None
