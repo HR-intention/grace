@@ -133,6 +133,137 @@ Notes the past failure modes:
 
 (Yes — touching `_client` from the outside is intentional for tests. Production code uses the real httpx client. A cleaner injection seam is fine if the connector exposes one.)
 
+## Test correctness: five patterns that have failed before
+
+These are the EXACT failure modes from the last cashfree generation (10 of 12 tests
+failed). Every one is a test-side bug — the connector code was fine but the test
+asserted the wrong thing or set up the mock wrong. Get all five right and the
+gates pass.
+
+### 1. Mock-transport path assertions must include the `base_url` prefix
+
+Cashfree's `base_url` is `https://sandbox.cashfree.com/pg`. When the connector
+calls `self._client.post("/orders", ...)`, the request `url.path` is
+**`/pg/orders`**, not `/orders`. Same for every other endpoint.
+
+```python
+# WRONG — strips the /pg prefix:
+def handler(request: httpx.Request) -> httpx.Response:
+    assert request.url.path == "/orders"                        # AssertionError: '/pg/orders' != '/orders'
+```
+
+```python
+# CORRECT — match against the suffix, or include the prefix:
+def handler(request: httpx.Request) -> httpx.Response:
+    assert request.url.path.endswith("/orders")                  # robust to base_url
+    # or, explicitly:
+    assert request.url.path == "/pg/orders"
+```
+
+The general pattern: in tests, use `.endswith(...)` on path or method-+-path
+together. Never assume the path equals just the path the connector source code
+passed to `self._client`.
+
+### 2. `_map_http_error` must differentiate 4xx from 5xx
+
+Tests for `*_400_error` paths assert `ConnectorErrorReason.INVALID_REQUEST`, but
+generic error handlers tend to map everything to `PSP_UNAVAILABLE`. Be explicit:
+
+```python
+# CORRECT _map_http_error in connector.py:
+def _map_http_error(e: httpx.HTTPStatusError) -> ConnectorError:
+    status = e.response.status_code
+    if status == 400 or status == 422:
+        return ConnectorError(reason=ConnectorErrorReason.INVALID_REQUEST, psp_code=str(status))
+    if status == 401:
+        return ConnectorError(reason=ConnectorErrorReason.AUTHENTICATION_FAILED, psp_code=str(status))
+    if status == 403:
+        return ConnectorError(reason=ConnectorErrorReason.AUTHORIZATION_FAILED, psp_code=str(status))
+    if status == 404:
+        return ConnectorError(reason=ConnectorErrorReason.ORDER_NOT_FOUND, psp_code=str(status))
+    if status == 409:
+        return ConnectorError(reason=ConnectorErrorReason.INVALID_ORDER_STATE, psp_code=str(status))
+    if status == 429:
+        return ConnectorError(reason=ConnectorErrorReason.RATE_LIMITED, psp_code=str(status))
+    if 500 <= status < 600:
+        return ConnectorError(reason=ConnectorErrorReason.PSP_UNAVAILABLE, psp_code=str(status))
+    return ConnectorError(reason=ConnectorErrorReason.PSP_ERROR, psp_code=str(status))
+```
+
+### 3. `sync_payment` test handler must respond to BOTH endpoints
+
+`sync_payment` typically hits `/orders/{id}` (order envelope) AND
+`/orders/{id}/payments` (attempts list). A handler that only returns 200 for
+the first endpoint gets a 404 on the second, the connector raises
+`ORDER_NOT_FOUND` from `raise_for_status`, and the test fails.
+
+```python
+# WRONG — single 200 for any request:
+def handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={"order_status": "PAID"})    # second GET hits this with no /payments data
+```
+
+```python
+# CORRECT — branch on path:
+def handler(request: httpx.Request) -> httpx.Response:
+    if request.url.path.endswith("/payments"):
+        return httpx.Response(200, json=[{"cf_payment_id": "918812", "payment_status": "SUCCESS", ...}])
+    # the order endpoint
+    return httpx.Response(200, json={"cf_order_id": "abc", "order_status": "PAID", ...})
+```
+
+### 4. Webhook test fixtures must sign payloads the same way the connector verifies
+
+The cashfree HMAC algorithm is HMAC-SHA256 over `timestamp + "." + body`, base64-encoded
+(check the PSP's docs for the exact recipe). The test fixture MUST use the same
+algorithm + the same secret to build a valid signature, otherwise the connector's
+`verify_signature` will reject it as tampered.
+
+```python
+# CORRECT webhook test signing — mirror auth.py's verify exactly:
+import base64, hashlib, hmac, json
+
+def _sign_cashfree(secret: str, timestamp: str, payload: bytes) -> str:
+    msg = (timestamp + payload.decode("utf-8")).encode("utf-8")
+    digest = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+async def test_webhook_payment_success() -> None:
+    payload = json.dumps({"type": "PAYMENT_SUCCESS_WEBHOOK", ...}).encode("utf-8")
+    timestamp = "1700000000"
+    sig = _sign_cashfree("test_webhook", timestamp, payload)
+    connector = _build_connector(lambda r: httpx.Response(200))
+    event = await connector.handle_webhook(payload, {
+        "x-webhook-timestamp": timestamp,
+        "x-webhook-signature": sig,
+    })
+    assert event.event_type == WebhookEventType.PAYMENT_SUCCESS
+```
+
+The fixture's `webhook_secret=Maskable("test_webhook")` must match the secret
+the signing helper uses.
+
+### 5. Assertions must check mock-RESPONSE values, not request-INPUT values
+
+```python
+# WRONG — asserting the input ID, which the connector echoes back:
+async def test_sync_refund_success() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"cf_refund_id": "1553338", "refund_status": "SUCCESS", ...})
+    connector = _build_connector(httpx.MockTransport(handler))
+    resp = await connector.sync_refund(_sync_refund_request())   # request.psp_refund_id == "cf_refund_qrs"
+    assert resp.psp_refund_id == "cf_refund_qrs"                  # ← WRONG: that was the input
+```
+
+```python
+# CORRECT — assert against what the PSP returned (the mock body):
+    assert resp.psp_refund_id == "1553338"                         # matches handler's cf_refund_id
+```
+
+The connector returns the PSP-side id from the response body. The input `psp_refund_id`
+on the request is just "which refund to look up"; the response is "what the PSP says
+about that refund". They are different IDs in this test pattern.
+
 ## Coverage discipline
 
 - Every branch in `connector.py` should be exercised by at least one test (happy + error path for each flow; signature-fail + at least two event types for the webhook).

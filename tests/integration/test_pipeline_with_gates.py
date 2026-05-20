@@ -137,9 +137,9 @@ def test_quality_report_json_exposes_each_gate_decision(tmp_path: Path) -> None:
     assert report["passed"] is False
     # Each gate visible separately.
     assert report["gates"]["mypy"]["passed"] is True
-    assert report["gates"]["coverage"]["passed"] is False
-    assert report["gates"]["coverage"]["actual"] == "55.0%"
-    assert report["gates"]["coverage"]["threshold"] == "≥ 80% line coverage"
+    assert report["gates"]["tests"]["passed"] is False
+    assert "55.0% coverage" in report["gates"]["tests"]["actual"]
+    assert "all tests pass" in report["gates"]["tests"]["threshold"]
     assert report["gates"]["rubric"]["passed"] is True
     assert isinstance(report["gates"]["rubric"]["actual"], int)
     assert report["gates"]["rubric"]["actual"] >= 60

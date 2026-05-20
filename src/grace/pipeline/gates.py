@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from grace.errors import GraceError, GraceErrorReason
@@ -19,10 +20,14 @@ class MypyReport:
 
 @dataclass(frozen=True)
 class PytestReport:
-    passed: bool
+    passed: bool                            # exit code 0 or 5 (no tests collected)
     coverage_pct: float | None
     stdout: str
     stderr: str
+    counts: dict[str, int] = field(default_factory=dict)
+    """Parsed from the pytest summary line: keys may include `passed`,
+    `failed`, `error`, `skipped`. Empty if the run aborted before pytest
+    printed its summary."""
 
 
 def run_mypy(*, target: Path, strict: bool = True) -> MypyReport:
@@ -33,6 +38,26 @@ def run_mypy(*, target: Path, strict: bool = True) -> MypyReport:
     cmd.append(str(target))
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     return MypyReport(passed=proc.returncode == 0, stdout=proc.stdout, stderr=proc.stderr)
+
+
+_PYTEST_SUMMARY_LINE_RE = re.compile(r"in [\d.]+s")
+_PYTEST_COUNT_RE = re.compile(r"(\d+) (passed|failed|error|errors|skipped|warnings)\b")
+
+
+def _parse_pytest_counts(stdout: str) -> dict[str, int]:
+    """Extract `{passed, failed, error, skipped}` counts from pytest's
+    terminal summary line ("10 failed, 2 passed in 0.62s"). Returns an
+    empty dict if no summary line is present (e.g., collection aborted)."""
+    for line in reversed(stdout.splitlines()):
+        if _PYTEST_SUMMARY_LINE_RE.search(line) and (
+            "passed" in line or "failed" in line or "error" in line
+        ):
+            out: dict[str, int] = {}
+            for m in _PYTEST_COUNT_RE.finditer(line):
+                key = m.group(2).rstrip("s")  # "errors" → "error"
+                out[key] = int(m.group(1))
+            return out
+    return {}
 
 
 def run_pytest_with_cov(*, target: Path) -> PytestReport:
@@ -59,7 +84,14 @@ def run_pytest_with_cov(*, target: Path) -> PytestReport:
             pct = None
     # pytest exits 5 when no tests collected — treat as 0% rather than failure.
     passed = proc.returncode in (0, 5)
-    return PytestReport(passed=passed, coverage_pct=pct, stdout=proc.stdout, stderr=proc.stderr)
+    counts = _parse_pytest_counts(proc.stdout)
+    return PytestReport(
+        passed=passed,
+        coverage_pct=pct,
+        stdout=proc.stdout,
+        stderr=proc.stderr,
+        counts=counts,
+    )
 
 
 def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> None:
@@ -93,16 +125,40 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
 
     coverage_pct = pytest_report.coverage_pct if pytest_report.coverage_pct is not None else 0.0
     mypy_error_count = _count_mypy_errors(mypy_report.stdout)
+
+    # The pytest gate has TWO conditions: all tests must pass (exit 0) AND
+    # coverage must be ≥ 80%. A run with 80% coverage but failing tests is
+    # NOT a green run — Claude has been writing tests that fail (wrong path
+    # assertions, wrong response-id assertions, HMAC mismatches) while still
+    # exercising enough lines for the coverage figure to look respectable.
+    failed_count = pytest_report.counts.get("failed", 0)
+    error_count = pytest_report.counts.get("error", 0)
+    passed_count = pytest_report.counts.get("passed", 0)
+    tests_all_green = pytest_report.passed and failed_count == 0 and error_count == 0
+    coverage_meets_threshold = coverage_pct >= 80.0
+
+    tests_summary_parts: list[str] = []
+    if passed_count or failed_count or error_count:
+        tests_summary_parts.append(f"{passed_count} passed")
+        if failed_count:
+            tests_summary_parts.append(f"{failed_count} failed")
+        if error_count:
+            tests_summary_parts.append(f"{error_count} error(s)")
+    else:
+        tests_summary_parts.append("0 tests collected")
+    tests_summary_parts.append(f"{coverage_pct:.1f}% coverage")
+    tests_actual = ", ".join(tests_summary_parts)
+
     gates = {
         "mypy": {
             "passed": mypy_report.passed,
             "threshold": "clean (--strict)",
             "actual": "clean" if mypy_report.passed else f"{mypy_error_count} error(s)",
         },
-        "coverage": {
-            "passed": coverage_pct >= 80.0,
-            "threshold": "≥ 80% line coverage",
-            "actual": f"{coverage_pct:.1f}%",
+        "tests": {
+            "passed": tests_all_green and coverage_meets_threshold,
+            "threshold": "all tests pass + ≥ 80% line coverage",
+            "actual": tests_actual,
         },
         "rubric": {
             "passed": rubric.total >= 60,
@@ -130,8 +186,11 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
             mypy_report.stdout.strip().splitlines()[-1] if mypy_report.stdout else "failed"
         )
         failures.append(f"mypy: {last_line}")
-    if not gates["coverage"]["passed"]:
-        failures.append(f"coverage: {coverage_pct:.1f}% < 80%")
+    if not gates["tests"]["passed"]:
+        if not tests_all_green:
+            failures.append(f"tests: {failed_count + error_count} failing")
+        if not coverage_meets_threshold:
+            failures.append(f"coverage: {coverage_pct:.1f}% < 80%")
     if not gates["rubric"]["passed"]:
         failures.append(f"rubric: {rubric.total} < 60")
     if failures:
