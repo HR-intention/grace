@@ -30,7 +30,7 @@ def _stderr_sink(text: str) -> None:
     sys.stderr.flush()
 
 
-def _truncate(s: str, limit: int = 120) -> str:
+def _truncate(s: str, limit: int = 500) -> str:
     s = s.replace("\n", " ").strip()
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
@@ -135,7 +135,7 @@ def _tool_use_hint(name: str, inp: dict[str, Any]) -> str:
             return f"{path}, {size}B"
         return str(path)
     if name == "Bash":
-        return _truncate(str(inp.get("command", "?")), 100)
+        return _truncate(str(inp.get("command", "?")), 500)
     if name == "Glob":
         return str(inp.get("pattern", "?"))
     if name == "Grep":
@@ -146,19 +146,24 @@ def _tool_use_hint(name: str, inp: dict[str, Any]) -> str:
         todos = inp.get("todos") or []
         return f"{len(todos)} item(s)"
     # Generic: keys-only summary keeps it short.
-    return _truncate(",".join(sorted(inp.keys())), 60)
+    return _truncate(",".join(sorted(inp.keys())), 200)
 
 
 def _result_snippet(content: Any) -> str:
-    """Render a tool_result body as a one-line summary."""
+    """Render a tool_result body as a one-line summary.
+
+    Short results (status messages, paths, error blurbs) show in full.
+    Large results (file reads, command output) get truncated at 500 chars
+    so the terminal stays scrollable without dumping kilobytes per event.
+    """
     if isinstance(content, str):
         if not content:
             return "(empty result)"
         size = len(content)
-        return f"result ({size}B): {_truncate(content, 80)}"
+        return f"result ({size}B): {_truncate(content, 500)}"
     if isinstance(content, list):
         return f"result ({len(content)} parts)"
-    return _truncate(json.dumps(content)[:200], 80)
+    return _truncate(json.dumps(content), 500)
 
 
 async def _tee(
