@@ -41,7 +41,7 @@ tests/test_webhook.py
 - **Signed PAYMENT_SUCCESS**: build a valid signed payload; assert `WebhookEvent.attempt.status == PaymentAttemptStatus.SUCCESS`.
 - **Signed PAYMENT_FAILED**: assert `attempt.status == FAILED` and `failure_code` populated (e.g., `CARD_DECLINED` or `USER_DROPPED` depending on PSP signal).
 - **Signed REFUND_SUCCESS**: assert `refund.status == SUCCESS`.
-- **Tampered payload**: change one byte after signing; assert `ConnectorError(reason=WEBHOOK_SIGNATURE_FAILED)`.
+- **Tampered payload**: mutate the payload bytes after signing so the bytes *actually* differ, then assert `ConnectorError(reason=WEBHOOK_SIGNATURE_FAILED)`. See pattern §8 below — the obvious-looking `payload[:-1] + b"}"` is a no-op because JSON always ends with `}`.
 
 ## Test fixture pattern (USE THESE EXACT KWARGS — locked types are extra="forbid")
 
@@ -339,6 +339,45 @@ class CashfreeWebhookPayload(BaseModel):
 ```
 
 Reuse the single payment model across contexts unless the PSP genuinely returns different shapes (rare). The same principle applies to refunds (`CashfreeRefund` covers sync_refund + webhook `data.refund`).
+
+### 8. Tampering tests must actually mutate the payload bytes
+
+The webhook tamper test is meant to confirm `verify_signature` rejects bodies that differ from what was signed. If the "tampered" bytes are byte-identical to the original, the HMAC still matches and the test fails with `DID NOT RAISE`.
+
+```python
+# WRONG — JSON always ends with `}`, so this is a no-op. payload == tampered.
+payload = json.dumps(_payment_success_payload()).encode("utf-8")
+sig = _sign(_WEBHOOK_SECRET, timestamp, payload)
+tampered = payload[:-1] + b"}"                                   # ← no change
+with pytest.raises(ConnectorError):                              # ← DID NOT RAISE
+    await connector.handle_webhook(tampered, {...})
+```
+
+```python
+# WRONG (also). `payload + b" "` keeps the original bytes intact at the
+# front; some PSP verifiers strip trailing whitespace before HMAC-ing, so
+# the signature can still validate.
+tampered = payload + b" "
+```
+
+The safe pattern: flip a byte **inside** the JSON body where the change is unambiguous and survives any whitespace normalization.
+
+```python
+# CORRECT — replace a value-substring with something the verifier cannot
+# explain away. Pick a literal you put into _payment_success_payload()
+# yourself so the swap is deterministic.
+tampered = payload.replace(b'"SUCCESS"', b'"FAILED"')
+assert tampered != payload, "tampering must actually change the bytes"
+
+with pytest.raises(ConnectorError) as exc_info:
+    await connector.handle_webhook(tampered, {
+        "x-webhook-timestamp": timestamp,
+        "x-webhook-signature": sig,                              # signature of ORIGINAL payload
+    })
+assert exc_info.value.reason == ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED
+```
+
+Always include the `assert tampered != payload` guard. It catches the no-op mutation at the source instead of letting it masquerade as a flaky test.
 
 ## Coverage discipline
 
