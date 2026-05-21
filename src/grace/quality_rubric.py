@@ -58,13 +58,17 @@ class RubricReport:
 
 # --- required public surface (per SUBPROJECT_GRACE_CODEGEN.md §3.2 + §5) ---
 REQUIRED_FILES = ["__init__.py", "connector.py", "auth.py", "models.py", "status_map.py"]
-REQUIRED_TEST_FILES = [
-    "tests/test_create_order.py",
-    "tests/test_sync_payment.py",
-    "tests/test_refund.py",
-    "tests/test_sync_refund.py",
-    "tests/test_webhook.py",
+REQUIRED_TEST_LEAVES = [
+    "test_create_order.py",
+    "test_sync_payment.py",
+    "test_refund.py",
+    "test_sync_refund.py",
+    "test_webhook.py",
 ]
+"""Leaf filenames (no `tests/` prefix). The directory they live in depends
+on whether `paths.tests_dir` is configured — when unset, tests live at
+`<output_dir>/tests/`; when set, they're relocated to `<tests_dir>/<psp>/`.
+`_score_public_surface` resolves the right root before checking."""
 REQUIRED_FLOW_METHODS = {
     "create_order",
     "sync_payment",
@@ -178,13 +182,22 @@ def _score_coverage(pytest_report: PytestReport) -> Dimension:
 
 
 def _score_public_surface(ctx: GenerationContext, output_dir: Path) -> Dimension:
+    # Imported here (not at module scope) to avoid a circular import: orchestrate
+    # imports the gates module, which imports quality_rubric.
+    from grace.pipeline.orchestrate import relocated_tests_path
+
     issues: list[str] = []
     for name in REQUIRED_FILES:
         if not (output_dir / name).is_file():
             issues.append(f"missing {name}")
-    for name in REQUIRED_TEST_FILES:
-        if not (output_dir / name).is_file():
-            issues.append(f"missing {name}")
+    # When `paths.tests_dir` is set, tests have been moved to
+    # `<tests_dir>/<psp>/`. The rubric must check the relocated location,
+    # else every relocated run flags 5 missing test files (− 20 score).
+    relocated = relocated_tests_path(ctx)
+    tests_root = relocated if relocated is not None else output_dir / "tests"
+    for leaf in REQUIRED_TEST_LEAVES:
+        if not (tests_root / leaf).is_file():
+            issues.append(f"missing tests/{leaf}")
 
     connector_py = output_dir / "connector.py"
     if connector_py.is_file():

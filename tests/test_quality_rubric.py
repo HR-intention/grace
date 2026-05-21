@@ -131,6 +131,61 @@ def test_rubric_marker_dimension_fails_when_marker_missing(tmp_path: Path) -> No
     assert marker_dim.score == 0
 
 
+def test_rubric_public_surface_finds_relocated_tests(tmp_path: Path) -> None:
+    """When `paths.tests_dir` is configured, generated tests live at
+    `<tests_dir>/<psp>/` instead of `<output_dir>/tests/`. The rubric must
+    look at the relocated location, else every relocated run flags 5
+    missing test files (−20 score) on an otherwise-perfect package."""
+    from dataclasses import replace
+
+    ctx = _ctx(tmp_path)
+    _scaffold_full_pkg(ctx.output_dir)
+
+    # Mimic _relocate_tests: move `<output_dir>/tests/` to `<tests_dir>/<psp>/`.
+    relocated_root = tmp_path / "relocated_tests" / "connectors"
+    relocated_root.mkdir(parents=True)
+    import shutil
+    shutil.move(str(ctx.output_dir / "tests"), str(relocated_root / "demo"))
+
+    ctx_with_relocation = replace(ctx, tests_dir=relocated_root)
+
+    report = score_rubric(
+        ctx=ctx_with_relocation,
+        output_dir=ctx_with_relocation.output_dir,
+        mypy_report=MypyReport(passed=True, stdout="", stderr=""),
+        pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
+    )
+    surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
+    assert surface_dim.score == surface_dim.max, surface_dim.detail
+
+
+def test_rubric_public_surface_flags_missing_relocated_tests(tmp_path: Path) -> None:
+    """If tests are missing from the relocated location too, surface fails."""
+    from dataclasses import replace
+
+    ctx = _ctx(tmp_path)
+    _scaffold_full_pkg(ctx.output_dir)
+    # Move tests but only carry over 2 of the 5 required files.
+    relocated_root = tmp_path / "relocated_tests" / "connectors"
+    dest = relocated_root / "demo"
+    dest.mkdir(parents=True)
+    for keep in ("test_create_order.py", "test_sync_payment.py"):
+        (dest / keep).write_text("def test_x(): pass\n")
+    import shutil
+    shutil.rmtree(ctx.output_dir / "tests")
+
+    ctx_with_relocation = replace(ctx, tests_dir=relocated_root)
+    report = score_rubric(
+        ctx=ctx_with_relocation,
+        output_dir=ctx_with_relocation.output_dir,
+        mypy_report=MypyReport(passed=True, stdout="", stderr=""),
+        pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
+    )
+    surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
+    assert surface_dim.score < surface_dim.max
+    assert "test_refund.py" in surface_dim.detail
+
+
 def test_rubric_public_surface_fails_when_class_missing(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _scaffold_full_pkg(ctx.output_dir)
