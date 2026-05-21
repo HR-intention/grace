@@ -187,10 +187,12 @@ def test_generate_records_last_run_even_when_pipeline_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A pipeline that raises (e.g., QUALITY_GATE_FAILED) must still leave
-    a recoverable last_run.json so `grace regenerate` can replay the args."""
-    fake_home = tmp_path / "home"
-    fake_home.mkdir()
-    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    a recoverable last_run.json so `grace regenerate` can replay the args.
+    The record lives under <cwd>/.grace/ so per-project state stays
+    per-project."""
+    project_root = tmp_path / "consumer_repo"
+    project_root.mkdir()
+    monkeypatch.chdir(project_root)
 
     async def fake_run_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
         raise GraceError(reason=GraceErrorReason.QUALITY_GATE_FAILED, detail="55 < 60")
@@ -207,11 +209,58 @@ def test_generate_records_last_run_even_when_pipeline_fails(
     )
     # Pipeline failed → non-zero exit, but the last-run record IS written.
     assert result.exit_code != 0
-    last_run = fake_home / ".grace" / "last_run.json"
+    last_run = project_root / ".grace" / "last_run.json"
     assert last_run.is_file()
     data = json.loads(last_run.read_text())
     assert data["psp"] == "cashfree"
     assert data["source"] == str(spec)
+
+
+def test_generate_last_run_isolated_per_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two different cwds → two independent last_run records. The whole
+    point of moving the file from ~/.grace to <cwd>/.grace."""
+
+    async def noop_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
+        return None
+
+    monkeypatch.setattr("grace.cli._run_pipeline", noop_pipeline)
+
+    spec_a = tmp_path / "docs_a"
+    spec_a.mkdir()
+    (spec_a / "a.md").write_text("# a")
+    spec_b = tmp_path / "docs_b"
+    spec_b.mkdir()
+    (spec_b / "b.md").write_text("# b")
+
+    project_a = tmp_path / "project_a"
+    project_a.mkdir()
+    project_b = tmp_path / "project_b"
+    project_b.mkdir()
+
+    # Project A generates first.
+    monkeypatch.chdir(project_a)
+    res_a = CliRunner().invoke(
+        main,
+        ["generate", "cashfree", "--from", str(spec_a), "--output", str(tmp_path / "out_a")],
+    )
+    assert res_a.exit_code == 0, res_a.output
+
+    # Project B generates next — must not see project A's args.
+    monkeypatch.chdir(project_b)
+    res_b = CliRunner().invoke(
+        main,
+        ["generate", "cashfree", "--from", str(spec_b), "--output", str(tmp_path / "out_b")],
+    )
+    assert res_b.exit_code == 0, res_b.output
+
+    data_a = json.loads((project_a / ".grace" / "last_run.json").read_text())
+    data_b = json.loads((project_b / ".grace" / "last_run.json").read_text())
+    assert data_a["source"] == str(spec_a)
+    assert data_b["source"] == str(spec_b)
+    # Project A's record didn't get clobbered by project B's run.
+    assert data_a != data_b
 
 
 def test_generate_prints_hint_on_timeout(

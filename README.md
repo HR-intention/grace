@@ -166,10 +166,12 @@ cat lens/connectors/cashfree/quality_report.json | python -m json.tool
 
 ```bash
 uv run grace regenerate cashfree
-# replays the last `grace generate cashfree` invocation from ~/.grace/last_run.json
+# replays the last `grace generate cashfree` invocation from <cwd>/.grace/last_run.json
 ```
 
 Use this when you've tightened the rulebook and want to re-run against the pinned docs.
+
+The record lives at `<cwd>/.grace/last_run.json` (i.e., in whichever consumer repo grace was invoked from), so two checkouts iterating on Grace simultaneously don't clobber each other's state. Add `.grace/` to your repo's `.gitignore`.
 
 ---
 

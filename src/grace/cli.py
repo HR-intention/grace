@@ -91,7 +91,18 @@ def _repo_root() -> Path:
 
 
 def _last_run_path() -> Path:
-    return Path.home() / ".grace" / "last_run.json"
+    """Per-project last-run record.
+
+    Lives at `<cwd>/.grace/last_run.json` (i.e., in whichever consumer
+    repo grace was invoked from), so two Lens-like checkouts iterating
+    on Grace simultaneously don't clobber each other's state. Add
+    `.grace/` to the consumer's `.gitignore`.
+
+    Was previously `~/.grace/last_run.json` (user-global); migration:
+    the next `grace generate` writes a fresh per-project record; the
+    old global file becomes vestigial and can be deleted.
+    """
+    return Path.cwd() / ".grace" / "last_run.json"
 
 
 def _save_last_run(*, psp: str, source: str, output: Path) -> None:

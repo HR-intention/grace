@@ -1,33 +1,39 @@
 """Test isolation autouse fixtures.
 
-These run before every test and prevent the test suite from touching the
-developer's real `~/` — specifically the `~/.grace/` config + last_run
-state that the CLI persists between runs.
+Two layers of defense to keep the test suite from touching the developer's
+real environment:
 
-Without this, tests that exercise `grace generate` via Click's CliRunner
-would write to the real `~/.grace/last_run.json` (because `_save_last_run`
-fires before the pipeline runs, regardless of whether the pipeline is
-mocked) and pollute the developer's environment. We've seen this cause
-a `grace regenerate` outside the test suite to replay a tmp pytest path
-that no longer exists.
+1. `Path.home()` → tmp_path subdir. Belt for any code that still reads from
+   the user-global `~/.grace/` (e.g., `grace.config.load_config`'s default
+   `~/.grace/config.yaml` lookup).
+
+2. `os.chdir(tmp_path)` → tmp_path. Suspenders for the per-project state
+   that `_last_run_path()` and `_default_docs_dir()` now resolve through
+   `Path.cwd()`. Without the chdir, a CLI test that invokes `grace generate`
+   would write `.grace/last_run.json` into Grace's own checkout.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolate_home_for_grace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Point Path.home() at a per-test tmp directory.
+def _isolate_filesystem_for_grace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Pin Path.home() and the process cwd to per-test tmp dirs.
 
-    Any code that builds paths off `Path.home()` (notably
-    `grace.cli._last_run_path` and `grace.config.load_config`'s default
-    `~/.grace/config.yaml` lookup) will land inside this test's tmp_path
-    sandbox instead of the developer's real home.
+    Per-test scope (matches tmp_path) so the isolation rolls back at the
+    end of every test, even if the test itself further mutates the cwd.
     """
     fake_home = tmp_path / "_grace_test_home"
     fake_home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    fake_cwd = tmp_path / "_grace_test_cwd"
+    fake_cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(fake_cwd)
