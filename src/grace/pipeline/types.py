@@ -30,6 +30,11 @@ class GenerationContext:
     lens_version_constraint: str
     grace_version: str
     source_version: str
+    reports_dir: Path
+    """Where quality_report.json and coverage.json land. Per-project +
+    per-psp: `<cwd>/.grace/runs/<psp>/`. Kept OUT of the generated
+    package directory so the reports don't end up committed alongside
+    the source they describe."""
 
 
 @dataclass(frozen=True)

@@ -60,8 +60,14 @@ def _parse_pytest_counts(stdout: str) -> dict[str, int]:
     return {}
 
 
-def run_pytest_with_cov(*, target: Path) -> PytestReport:
+def run_pytest_with_cov(*, target: Path, json_report_path: Path | None = None) -> PytestReport:
     """Invoke pytest with coverage on the target package; parse the JSON report.
+
+    `json_report_path` overrides where pytest-cov writes the JSON
+    summary. When omitted, falls back to `<target.parent>/_grace_coverage.json`
+    (the legacy location). Callers from the v1 pipeline pass
+    `<cwd>/.grace/runs/<psp>/coverage.json` so the report lives outside
+    the generated package directory.
 
     NOTE: we deliberately do NOT pass `-q`. Quiet mode suppresses pytest's
     bottom summary line ("6 failed, 6 passed in 0.58s") when running under
@@ -69,7 +75,10 @@ def run_pytest_with_cov(*, target: Path) -> PytestReport:
     to extract per-status counts from stdout. Without -q the summary is
     always present and `_parse_pytest_counts` can do its job.
     """
-    json_report = target.parent / "_grace_coverage.json"
+    json_report = (
+        json_report_path if json_report_path is not None else target.parent / "_grace_coverage.json"
+    )
+    json_report.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
         "-m",
@@ -120,8 +129,14 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
     # The runner is supposed to materialize this directory but defend against the
     # zero-files case (e.g. a stub runner in tests, or a Claude run that wrote nothing).
     result.output_dir.mkdir(parents=True, exist_ok=True)
+    ctx.reports_dir.mkdir(parents=True, exist_ok=True)
+    coverage_json_path = ctx.reports_dir / "coverage.json"
+    quality_report_path = ctx.reports_dir / "quality_report.json"
+
     mypy_report = run_mypy(target=result.output_dir, strict=True)
-    pytest_report = run_pytest_with_cov(target=result.output_dir)
+    pytest_report = run_pytest_with_cov(
+        target=result.output_dir, json_report_path=coverage_json_path
+    )
     rubric: RubricReport = score_rubric(
         ctx=ctx,
         output_dir=result.output_dir,
@@ -189,9 +204,7 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
     }
     if run_stats:
         report_payload["run"] = run_stats
-    (result.output_dir / "quality_report.json").write_text(
-        _json.dumps(report_payload, indent=2)
-    )
+    quality_report_path.write_text(_json.dumps(report_payload, indent=2))
 
     failures: list[str] = []
     if not gates["mypy"]["passed"]:

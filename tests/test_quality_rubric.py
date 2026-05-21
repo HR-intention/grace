@@ -23,6 +23,7 @@ def _ctx(tmp_path: Path) -> GenerationContext:
         lens_version_constraint="^0.1",
         grace_version="0.1.0",
         source_version="x",
+        reports_dir=tmp_path / "_reports",
     )
 
 

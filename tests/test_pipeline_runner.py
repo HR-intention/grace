@@ -97,6 +97,7 @@ def fake_ctx(tmp_path: Path) -> GenerationContext:
         lens_version_constraint="^0.1",
         grace_version="0.1.0",
         source_version="2024-09-01",
+        reports_dir=tmp_path / "_reports",
     )
 
 
@@ -329,6 +330,7 @@ def test_generate_passes_add_dir_for_rulebook_and_psp_docs(
         lens_version_constraint="^0.1",
         grace_version="0.1.0",
         source_version="2024-09-01",
+        reports_dir=tmp_path / "_reports",
     )
 
     captured_args: list[str] = []

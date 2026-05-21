@@ -67,6 +67,7 @@ def test_quality_report_json_exposes_each_gate_decision(tmp_path: Path) -> None:
         lens_version_constraint="^0.1",
         grace_version="0.1.0",
         source_version="x",
+        reports_dir=tmp_path / "_reports",
     )
     # Scaffold a complete package so the rubric scores high.
     out = ctx.output_dir
@@ -132,7 +133,7 @@ def test_quality_report_json_exposes_each_gate_decision(tmp_path: Path) -> None:
     assert exc.value.reason is GraceErrorReason.QUALITY_GATE_FAILED
     assert "coverage: 55.0%" in (exc.value.detail or "")
 
-    report = json.loads((out / "quality_report.json").read_text())
+    report = json.loads((ctx.reports_dir / "quality_report.json").read_text())
     # Top-level passed reflects all gates — the drift fix.
     assert report["passed"] is False
     # Each gate visible separately.
@@ -160,6 +161,7 @@ def test_pipeline_raises_when_rubric_fails(tmp_path: Path) -> None:
         lens_version_constraint="^0.1",
         grace_version="0.1.0",
         source_version="x",
+        reports_dir=tmp_path / "_reports",
     )
     runner = _StubRunner(files=[])
     with pytest.raises(GraceError) as exc:

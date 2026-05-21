@@ -30,6 +30,7 @@ def test_generation_context_construction(tmp_path: Path) -> None:
         lens_version_constraint="^0.1",
         grace_version="0.1.0",
         source_version="2024-09-01",
+        reports_dir=tmp_path / "_reports",
     )
     assert ctx.psp_name == "cashfree"
     assert ctx.target_module == "lens.connectors.cashfree"

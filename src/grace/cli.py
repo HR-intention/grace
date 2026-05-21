@@ -153,6 +153,26 @@ def doctor() -> None:
     raise SystemExit(1)
 
 
+def _log_report_paths(reports_dir: Path) -> None:
+    """Print the locations of quality_report.json + coverage.json with a
+    short tip on the most useful jq invocations. Called from the `finally`
+    branch of `generate` so it fires on both success and failure paths.
+    """
+    quality = reports_dir / "quality_report.json"
+    coverage = reports_dir / "coverage.json"
+    click.echo()
+    click.echo("Reports:")
+    if quality.is_file():
+        click.echo(f"  quality:   {quality}")
+    if coverage.is_file():
+        click.echo(f"  coverage:  {coverage}")
+    if quality.is_file():
+        click.echo(
+            "  inspect:   "
+            f"cat {quality} | python -m json.tool"
+        )
+
+
 def _default_docs_dir(psp: str, cfg: "GraceConfig | None" = None) -> Path:
     """`<docs_dir>/<psp>/` under the **current working directory**.
 
@@ -252,9 +272,15 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
             f"Output streams below; quality gates run after exit."
         )
         click.echo("─" * 78)
-        asyncio.run(_run_pipeline(ctx=ctx, runner=runner, hooks=PipelineHooks(run_gates=True)))
-        click.echo("─" * 78)
-        click.echo(f"OK: wrote {out}")
+        try:
+            asyncio.run(_run_pipeline(ctx=ctx, runner=runner, hooks=PipelineHooks(run_gates=True)))
+            click.echo("─" * 78)
+            click.echo(f"OK: wrote {out}")
+        finally:
+            # Report paths are always interesting — on success the user wants
+            # to inspect quality_report.json; on failure they want the findings
+            # list and the coverage breakdown. Print them either way.
+            _log_report_paths(ctx.reports_dir)
 
         # Auto-refresh the consumer-side docs catalog so llms.txt stays in sync
         # with every successful generation. Best-effort: a docs-build failure
