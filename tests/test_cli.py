@@ -7,6 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from grace.cli import main
+from grace.config import set_config_value  # noqa: F401  (used implicitly via CLI)
 from grace.errors import GraceError, GraceErrorReason
 
 
@@ -72,7 +73,7 @@ def test_generate_defaults_to_connector_docs_dir(
     # The Grace rulebook needs to exist under fake_repo too; cheaper to point
     # _repo_root at the real repo and just shim _default_docs_dir.
     real_repo = Path(__file__).resolve().parents[1]
-    monkeypatch.setattr("grace.cli._default_docs_dir", lambda _psp: docs)
+    monkeypatch.setattr("grace.cli._default_docs_dir", lambda _psp, _cfg=None: docs)
     monkeypatch.setattr("grace.cli._repo_root", lambda: real_repo)
 
     captured: dict[str, str] = {}
@@ -95,7 +96,7 @@ def test_generate_missing_docs_dir_raises(
     """No --from + empty connector_docs/<psp>/ → ClickException with a hint."""
     empty = tmp_path / "connector_docs" / "empty"
     empty.mkdir(parents=True)
-    monkeypatch.setattr("grace.cli._default_docs_dir", lambda _psp: empty)
+    monkeypatch.setattr("grace.cli._default_docs_dir", lambda _psp, _cfg=None: empty)
     result = CliRunner().invoke(main, ["generate", "empty"])
     assert result.exit_code != 0
     assert "fetch-docs" in result.output
@@ -181,6 +182,62 @@ def test_generate_prints_actionable_hint_on_401(
     assert "API Error: 401" in out
     # The README pointer / GitHub issue tag is mentioned for further reading.
     assert "anthropics/claude-code" in out
+
+
+def test_config_show_with_no_file_lists_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(main, ["config", "show"])
+    assert result.exit_code == 0, result.output
+    assert "defaults" in result.output
+    assert "connector_docs" in result.output     # docs_dir default
+    assert "lens/connectors" in result.output    # output_dir default
+
+
+def test_config_set_then_show_reflects_change(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    set_result = CliRunner().invoke(
+        main, ["config", "set", "paths.output_dir", "src/lens/connectors"]
+    )
+    assert set_result.exit_code == 0, set_result.output
+    show_result = CliRunner().invoke(main, ["config", "show"])
+    assert "src/lens/connectors" in show_result.output
+    # And the file actually exists on disk.
+    assert (tmp_path / ".grace" / "config.yaml").is_file()
+
+
+def test_config_get_returns_single_value(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    CliRunner().invoke(main, ["config", "set", "paths.docs_dir", "my_docs"])
+    result = CliRunner().invoke(main, ["config", "get", "paths.docs_dir"])
+    assert result.exit_code == 0, result.output
+    assert "my_docs" in result.output
+
+
+def test_generate_uses_configured_output_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A `grace config set paths.output_dir src/lens/connectors` makes the
+    next `grace generate <psp>` (with no --output) land there."""
+    monkeypatch.chdir(tmp_path)
+    CliRunner().invoke(main, ["config", "set", "paths.output_dir", "src/lens/connectors"])
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_pipeline(*, ctx: object, runner: object, hooks: object) -> None:
+        captured["output_dir"] = ctx.output_dir  # type: ignore[attr-defined]
+
+    monkeypatch.setattr("grace.cli._run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr("grace.cli.build_docs", lambda lens_root: type("R", (), {
+        "output_root": tmp_path / "docs-generated", "connectors": []
+    })())
+
+    spec = tmp_path / "docs"
+    spec.mkdir()
+    (spec / "x.md").write_text("# x")
+    result = CliRunner().invoke(main, ["generate", "cashfree", "--from", str(spec)])
+    assert result.exit_code == 0, result.output
+    expected = (tmp_path / "src" / "lens" / "connectors" / "cashfree").resolve()
+    assert Path(str(captured["output_dir"])).resolve() == expected
 
 
 def test_generate_records_last_run_even_when_pipeline_fails(

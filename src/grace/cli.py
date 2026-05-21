@@ -8,7 +8,12 @@ from typing import Any
 
 import click
 
-from grace.config import load_config
+from grace.config import (
+    GraceConfig,
+    load_config,
+    load_config_with_source,
+    set_config_value,
+)
 from grace.docs_build import build_docs
 from grace.errors import GraceError, GraceErrorReason
 from grace.fetch_docs import fetch_docs
@@ -148,15 +153,29 @@ def doctor() -> None:
     raise SystemExit(1)
 
 
-def _default_docs_dir(psp: str) -> Path:
-    """`connector_docs/<psp>/` under the **current working directory**.
+def _default_docs_dir(psp: str, cfg: "GraceConfig | None" = None) -> Path:
+    """`<docs_dir>/<psp>/` under the **current working directory**.
 
-    The expectation is that grace is invoked from inside the consumer repo
-    (e.g. Lens), so docs snapshots get versioned alongside the package they
-    produced — not inside Grace's own tree. Grace is a CLI tool the consumer
-    depends on, never the other way around.
+    `docs_dir` is read from `<cwd>/.grace/config.yaml` if configured
+    (`paths.docs_dir`), defaulting to `connector_docs`. The expectation is
+    that grace is invoked from inside the consumer repo (e.g. Lens), so
+    docs snapshots get versioned alongside the package they produced —
+    not inside Grace's own tree.
     """
-    return Path.cwd() / "connector_docs" / psp
+    cfg = cfg if cfg is not None else load_config()
+    return Path.cwd() / cfg.paths.docs_dir / psp
+
+
+def _default_output_dir(psp: str, cfg: "GraceConfig | None" = None) -> Path:
+    """`<output_dir>/<psp>/` under the **current working directory**.
+
+    `output_dir` is read from `<cwd>/.grace/config.yaml` (`paths.output_dir`),
+    defaulting to `lens/connectors`. For src-layout consumers (Lens uses
+    `src/lens/`), set this to `src/lens/connectors` so the generated package
+    is importable as `lens.connectors.<psp>`.
+    """
+    cfg = cfg if cfg is not None else load_config()
+    return Path.cwd() / cfg.paths.output_dir / psp
 
 
 @main.command()
@@ -189,15 +208,23 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
     cfg = load_config(config_path=config)
 
     if source is None:
-        default = _default_docs_dir(psp)
+        default = _default_docs_dir(psp, cfg)
         if not default.is_dir() or not any(default.iterdir()):
             raise click.ClickException(
                 f"no --from and {default} is empty; run "
-                f"`grace fetch-docs {psp} --from <llms.txt-url>` first"
+                f"`grace fetch-docs {psp} --from <llms.txt-url>` first "
+                f"(or `grace config set paths.docs_dir <new-path>` to point elsewhere)"
             )
         source = str(default)
 
-    out = output or (Path.cwd() / "lens" / "connectors" / psp)
+    out = output or _default_output_dir(psp, cfg)
+
+    # Log resolved paths so the user always sees what's about to be read /
+    # written. Avoids the "wait, where did the files go?" surprise.
+    click.echo(f"→ Source: {source}")
+    click.echo(f"→ Output: {out}")
+    click.echo(f"→ Lens version constraint: {cfg.lens.version_constraint}")
+    click.echo()
 
     # Persist the invocation args BEFORE running the pipeline so `grace
     # regenerate <psp>` can replay them even when the pipeline raises
@@ -273,7 +300,8 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
     "output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Output directory. Defaults to <repo>/connector_docs/<psp>/.",
+    help="Output directory. Defaults to <repo>/<paths.docs_dir>/<psp>/ "
+    "(set via `grace config set paths.docs_dir <path>`).",
 )
 def fetch_docs_cmd(
     psp: str,
@@ -283,7 +311,11 @@ def fetch_docs_cmd(
     output: Path | None,
 ) -> None:
     """Fetch a PSP's docs from its llms.txt into connector_docs/<psp>/."""
-    out = output or _default_docs_dir(psp)
+    cfg = load_config()
+    out = output or _default_docs_dir(psp, cfg)
+    click.echo(f"→ From: {source}")
+    click.echo(f"→ Into: {out}")
+    click.echo()
     try:
         result = fetch_docs(
             psp_name=psp,
@@ -363,6 +395,79 @@ def skills_install_cmd(force: bool, output: Path | None) -> None:
     )
     for s in result.skills_installed:
         click.echo(f"  - {s}")
+
+
+@main.group(name="config")
+def config_group() -> None:
+    """Inspect and edit grace's per-project config at <cwd>/.grace/config.yaml."""
+
+
+@config_group.command(name="show")
+def config_show_cmd() -> None:
+    """Print the effective config + the file it was loaded from."""
+    loaded = load_config_with_source()
+    src = loaded.source if loaded.source is not None else "(defaults — no config file found)"
+    click.echo(f"Source: {src}")
+    click.echo()
+    click.echo("Effective config:")
+    click.echo("  paths:")
+    click.echo(f"    docs_dir:    {loaded.config.paths.docs_dir}")
+    click.echo(f"    output_dir:  {loaded.config.paths.output_dir}")
+    click.echo("  claude_code:")
+    click.echo(f"    cli_path:    {loaded.config.claude_code.cli_path or '(auto-detect)'}")
+    click.echo(f"    timeout_s:   {int(loaded.config.claude_code.timeout_s)}")
+    click.echo("  quality:")
+    click.echo(f"    mypy_strict:        {loaded.config.quality.mypy_strict}")
+    click.echo(f"    min_coverage_pct:   {loaded.config.quality.min_coverage_pct}")
+    click.echo(f"    min_rubric_score:   {loaded.config.quality.min_rubric_score}")
+    click.echo("  lens:")
+    click.echo(f"    version_constraint: {loaded.config.lens.version_constraint}")
+    click.echo()
+    docs_psp = _default_docs_dir("<psp>", loaded.config)
+    out_psp = _default_output_dir("<psp>", loaded.config)
+    click.echo("Resolved at <cwd>:")
+    click.echo(f"  docs:    {docs_psp}")
+    click.echo(f"  output:  {out_psp}")
+
+
+@config_group.command(name="set")
+@click.argument("key")
+@click.argument("value")
+def config_set_cmd(key: str, value: str) -> None:
+    """Set a config value. KEY is dotted (e.g., `paths.output_dir`).
+
+    Writes to `<cwd>/.grace/config.yaml`, creating it if needed. Refuses
+    invalid values (validated against the same Pydantic schema as on-load).
+
+    Examples:
+
+      grace config set paths.output_dir src/lens/connectors
+      grace config set paths.docs_dir   connector_docs
+      grace config set claude_code.timeout_s 9000
+    """
+    try:
+        written = set_config_value(key, value)
+    except GraceError as e:
+        raise _click_error_from_grace(e) from e
+    click.echo(f"OK: {key} = {value!r} → {written}")
+
+
+@config_group.command(name="get")
+@click.argument("key")
+def config_get_cmd(key: str) -> None:
+    """Print the current value for a dotted config key."""
+    if "." not in key:
+        raise click.ClickException(
+            f"key must be dotted (e.g., paths.output_dir), got: {key!r}"
+        )
+    section, _, leaf = key.partition(".")
+    cfg = load_config()
+    section_obj = getattr(cfg, section, None)
+    if section_obj is None:
+        raise click.ClickException(f"unknown section: {section!r}")
+    if not hasattr(section_obj, leaf):
+        raise click.ClickException(f"unknown key: {key!r}")
+    click.echo(getattr(section_obj, leaf))
 
 
 @main.command()

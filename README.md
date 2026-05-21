@@ -69,14 +69,49 @@ uv run grace doctor
 
 If `claude setup-token` itself errors, your installed CLI version may not support it — upgrade Claude Code, or fall back to an `ANTHROPIC_API_KEY` from `console.anthropic.com` (API credit required).
 
-### 3. (Optional) Per-user config
+### 3. Configure paths for your repo layout
 
-`~/.grace/config.yaml` (all keys optional):
+Grace looks for `<cwd>/.grace/config.yaml` first, falling back to
+`~/.grace/config.yaml`, then built-in defaults. The most important keys for
+a new consumer are the `paths.*` settings — these tell Grace where to put
+docs snapshots and the generated package.
+
+For a **src-layout** consumer like Lens (where the package root is
+`src/lens/`), one-time setup:
+
+```bash
+cd /path/to/lens
+uv run grace config set paths.output_dir src/lens/connectors
+# Optional: change the docs snapshot dir too
+# uv run grace config set paths.docs_dir my_docs
+```
+
+That writes `<cwd>/.grace/config.yaml`. Verify with:
+
+```bash
+uv run grace config show
+# → docs_dir   = connector_docs
+# → output_dir = src/lens/connectors
+# Resolved at <cwd>:
+#   docs:    /path/to/lens/connector_docs/<psp>
+#   output:  /path/to/lens/src/lens/connectors/<psp>
+```
+
+Without this step, `output_dir` defaults to `lens/connectors` (flat layout
+at the repo root) — which is **outside the importable package** for
+src-layout repos, so `from lens.connectors.<psp> import ...` won't resolve
+to the generated code. Setting it to `src/lens/connectors` puts the
+generated package on the import path.
+
+The same config file accepts any of:
 
 ```yaml
+paths:
+  docs_dir: connector_docs            # default; where fetch-docs writes
+  output_dir: src/lens/connectors      # default is lens/connectors
 claude_code:
-  cli_path: null          # null ⇒ auto-detect via `which claude`
-  timeout_s: 6000         # 100 min; raise if generations time out
+  cli_path: null                       # null ⇒ auto-detect via `which claude`
+  timeout_s: 6000                      # 100 min; raise for very complex PSPs
 quality:
   mypy_strict: true
   min_coverage_pct: 80
@@ -85,7 +120,9 @@ lens:
   version_constraint: "^0.1"
 ```
 
-CLI flags override config. **No provider API keys live here.**
+CLI flags override config. `--output <path>` and `--from <path>` on `grace
+generate` always beat the configured defaults. **No provider API keys live
+here.** Add `.grace/` to your `.gitignore`.
 
 ---
 
@@ -180,6 +217,7 @@ The record lives at `<cwd>/.grace/last_run.json` (i.e., in whichever consumer re
 ```
 grace --version
 grace doctor                                          # is Claude Code reachable?
+grace config show / get <key> / set <key> <value>     # per-project paths + thresholds
 grace fetch-docs <psp> --from <llms.txt-url-or-path>  # snapshot PSP docs
 grace generate   <psp> [--from <src>] [--output <dir>]
 grace regenerate <psp>
