@@ -21,27 +21,44 @@ tests/test_webhook.py
 
 ## Required cases per file
 
+> Each defensive branch your connector code writes (every `except`, every
+> `if status == X:` in the HTTP error mapper, every `_map_*` fallback
+> for unknown PSP enum values) MUST be exercised by at least one test.
+> Coverage drops below the 80% gate fast when the connector grows a
+> 7-case HTTP-error mapper but tests only cover the 400 branch. The
+> required cases below are the minimum that brings every error branch
+> the rulebook permits into the test suite.
+
 ### `test_create_order.py`
 - **Happy path**: PSP returns 200 with `psp_order_id` + `payment_link`; assert `CreateOrderResponse` round-trips.
-- **4xx path**: PSP returns 400 with an error body; assert `ConnectorError` raised with the right `reason`.
+- **4xx path**: PSP returns 400 with an error body; assert `ConnectorError(reason=INVALID_REQUEST)`.
+- **5xx path**: PSP returns 503 (or any 5xx); assert `ConnectorError(reason=PSP_UNAVAILABLE)`. Hits the `500 <= status < 600` branch of the HTTP-error mapper.
+- **Network-error path**: the `MockTransport` handler raises `httpx.ConnectError("dns")` (or any non-`HTTPStatusError` `httpx.HTTPError` subclass); assert `ConnectorError(reason=PSP_UNAVAILABLE)`. This covers the `except httpx.HTTPError` branch that wraps transport-level failures distinct from HTTP status errors.
+- **HTTP error mapping coverage**: a single parametrized test (or a loop) that calls the connector's `_map_http_error` (or whatever the module-level helper is called) once per status code the helper handles — at minimum 400, 401, 403, 404, 409, 429, and one 5xx — and asserts the `ConnectorErrorReason` matches the mapping in `connector.py`. One file in the suite must own this; `test_create_order.py` is the home because it's where `_map_http_error` was introduced. Without this test, 6+ branches in the mapper land outside the test gap and tank coverage on `connector.py`.
 
 ### `test_sync_payment.py`
 - **Single-attempt path**: order has one `SUCCESS` attempt; assert `attempts` has one entry, `paid_amount` populated.
 - **Multi-attempt path**: order has two attempts, first `FAILED` then `SUCCESS`; assert `attempts` list contains both in observation order with the correct statuses, and `paid_amount` reflects the success.
+- **5xx path**: order endpoint returns 503; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **Unknown PSP order-status path**: order endpoint returns `order_status: "WEIRD_NEW_STATUS"` (a string that's not in your `_PAYMENT_STATUS_MAP` / `_ORDER_STATUS_MAP`); assert the call succeeds (does NOT raise) and `response.status` is the documented fallback (typically `OrderStatus.FAILED` or `UNKNOWN`). Exercises the `_log.warning("unknown_*_status", ...)` fallback path that's otherwise dead code.
 
 ### `test_refund.py`
 - **Happy path**: PSP returns a `psp_refund_id` + `PENDING` (or `SUCCESS`) status.
 - **Already-refunded path**: PSP returns 4xx-equivalent ("refund already exists" / "amount exceeds remaining"); assert `ConnectorError(reason=INVALID_ORDER_STATE)` or the relevant typed error.
+- **5xx path**: refund endpoint returns 502; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 
 ### `test_sync_refund.py`
 - **PENDING path**: PSP returns `pending`; assert `RefundStatus.PENDING`.
 - **SUCCESS path**: PSP returns `success` + `refunded_amount`; assert `RefundStatus.SUCCESS` and the amount echoes.
+- **Not-found path**: PSP returns 404 with an error body; assert `ConnectorError(reason=REFUND_NOT_FOUND)` (or whatever the connector's explicit 404 branch maps to — usually distinct from `ORDER_NOT_FOUND` here).
+- **Malformed-response path**: handler returns 200 with a body missing one of the wire model's required fields (e.g., omit `refund_status`); assert `ConnectorError(reason=INTERNAL)`. Exercises the `except ValidationError` branch where Pydantic rejects the PSP's response shape — a class of bug that's been the source of real production incidents.
 
 ### `test_webhook.py`
 - **Signed PAYMENT_SUCCESS**: build a valid signed payload; assert `WebhookEvent.attempt.status == PaymentAttemptStatus.SUCCESS`.
 - **Signed PAYMENT_FAILED**: assert `attempt.status == FAILED` and `failure_code` populated (e.g., `CARD_DECLINED` or `USER_DROPPED` depending on PSP signal).
 - **Signed REFUND_SUCCESS**: assert `refund.status == SUCCESS`.
 - **Tampered payload**: mutate the payload bytes after signing so the bytes *actually* differ, then assert `ConnectorError(reason=WEBHOOK_SIGNATURE_FAILED)`. See pattern §8 below — the obvious-looking `payload[:-1] + b"}"` is a no-op because JSON always ends with `}`.
+- **Unknown event type**: signed payload with `type: "UNKNOWN_FUTURE_EVENT_TYPE"`; assert `handle_webhook` does NOT raise and returns a `WebhookEvent` whose `event_type` is the documented fallback (typically `WebhookEventType.PAYMENT_INITIATED` or your equivalent). Covers the `_log.warning("unknown_webhook_event_type", ...)` path.
 
 ## Test fixture pattern (USE THESE EXACT KWARGS — locked types are extra="forbid")
 
@@ -381,6 +398,12 @@ Always include the `assert tampered != payload` guard. It catches the no-op muta
 
 ## Coverage discipline
 
-- Every branch in `connector.py` should be exercised by at least one test (happy + error path for each flow; signature-fail + at least two event types for the webhook).
-- `status_map.py` should have at least one test exercising `map_status` for each entry, plus the `UNKNOWN` fallback.
-- `auth.py` signing/verification helpers each get a direct unit test.
+The 80% line-coverage gate fails when defensive branches go untested. The required cases above were chosen so that the most common gap-creators (HTTP error mapping, network errors, unknown PSP enum values, Pydantic ValidationError on response parsing, webhook fallback) each get at least one test. With those in place a typical 4-flow connector lands at ≥80% without needing further coverage padding.
+
+A few extra disciplines on top:
+
+- `status_map.py`: one parametrized test exercising every entry in your status-map dict, plus the `UNKNOWN`/fallback branch when the input is not present. These are pure functions — the test is cheap and pays for itself in coverage.
+- `auth.py`: signing and verification helpers each get a direct unit test (correct-signature → True, tampered-signature → False, missing-headers → False). The webhook-handler test in `test_webhook.py` covers the integration path; `auth.py` tests cover the helper in isolation.
+- Don't write code you don't intend to test. If a defensive branch isn't reachable in practice (e.g., a `else: assert False, "unreachable"` after an exhaustive enum match), don't emit it — it just sits in the test gap. Use a real enum match or `typing.assert_never` instead.
+
+The combined effect is that the test suite mirrors the structure of `connector.py`: every public method has at least one error-path test, every helper has a direct test, and every fallback branch in the `_map_*` family is reached at least once.

@@ -40,12 +40,19 @@ status_map.py   — PSP-specific status string -> (PaymentAttemptStatus, Payment
                   returns (PENDING/SUCCESS/FAILED, code-or-None) and falls back to
                   (FAILED, PaymentFailureCode.UNKNOWN) with a structlog.warning for unknown values.
 
-tests/test_create_order.py — httpx.MockTransport-backed test of the happy path + a 4xx path.
-tests/test_sync_payment.py — single-attempt + multi-attempt (first FAILED, second SUCCESS) cases.
-tests/test_refund.py       — happy path + already-refunded path.
-tests/test_sync_refund.py  — PENDING and SUCCESS paths.
-tests/test_webhook.py      — signed PAYMENT_SUCCESS, signed PAYMENT_FAILED, signed REFUND_SUCCESS,
-                             tampered payload -> ConnectorError(WEBHOOK_SIGNATURE_FAILED).
+tests/test_create_order.py — happy + 4xx + 5xx + network-error paths, plus a parametrized
+                             test of every branch in `_map_http_error`. See testing.md for the
+                             full required-case list per file — the 5xx / network-error /
+                             error-mapping cases are what keep coverage ≥ 80% once the connector
+                             grows a 6+ branch HTTP-error mapper.
+tests/test_sync_payment.py — single-attempt + multi-attempt + 5xx + unknown PSP order-status
+                             fallback cases.
+tests/test_refund.py       — happy + already-refunded + 5xx paths.
+tests/test_sync_refund.py  — PENDING + SUCCESS + not-found (404) + malformed-response
+                             (ValidationError) paths.
+tests/test_webhook.py      — signed PAYMENT_SUCCESS / PAYMENT_FAILED / REFUND_SUCCESS, tampered
+                             payload -> ConnectorError(WEBHOOK_SIGNATURE_FAILED), unknown
+                             event-type fallback.
 ```
 
 ## Optional / additive files
