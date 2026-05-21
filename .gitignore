@@ -8,7 +8,7 @@ scripts/grace_cli.egg-info/
 venv/*
 
 .venv/*
-uv.lock
+.coverage
 grace_cli.egg-info/
 __pycache__/
 *.pyc
@@ -26,10 +26,8 @@ npm-debug.log*
 output/
 
 
-# rulesbook/codegen/references/specs/*
+rulesbook/codegen/references/
 
-**/references/**
-
-grace
 .grace
 .envrc
+connector_docs/
