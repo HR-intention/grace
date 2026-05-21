@@ -60,8 +60,19 @@ def _parse_pytest_counts(stdout: str) -> dict[str, int]:
     return {}
 
 
-def run_pytest_with_cov(*, target: Path, json_report_path: Path | None = None) -> PytestReport:
+def run_pytest_with_cov(
+    *,
+    target: Path,
+    test_paths: list[Path] | None = None,
+    json_report_path: Path | None = None,
+) -> PytestReport:
     """Invoke pytest with coverage on the target package; parse the JSON report.
+
+    `target` is always what `--cov` measures (the connector package).
+    `test_paths` is where pytest discovers tests — defaults to `[target]`
+    (the canonical in-package layout, tests under `<target>/tests/`).
+    Pass an explicit list when tests have been relocated outside the
+    package (the `paths.tests_dir` workflow).
 
     `json_report_path` overrides where pytest-cov writes the JSON
     summary. When omitted, falls back to `<target.parent>/_grace_coverage.json`
@@ -79,6 +90,7 @@ def run_pytest_with_cov(*, target: Path, json_report_path: Path | None = None) -
         json_report_path if json_report_path is not None else target.parent / "_grace_coverage.json"
     )
     json_report.parent.mkdir(parents=True, exist_ok=True)
+    discovery_paths = test_paths if test_paths is not None else [target]
     cmd = [
         sys.executable,
         "-m",
@@ -87,7 +99,7 @@ def run_pytest_with_cov(*, target: Path, json_report_path: Path | None = None) -
         str(target),
         "--cov-report",
         f"json:{json_report}",
-        str(target),
+        *(str(p) for p in discovery_paths),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     pct: float | None = None
@@ -134,8 +146,17 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
     quality_report_path = ctx.reports_dir / "quality_report.json"
 
     mypy_report = run_mypy(target=result.output_dir, strict=True)
+    # If the consumer configured `paths.tests_dir`, orchestrate has already
+    # moved `<output_dir>/tests/` to `<tests_dir>/<psp>/` — point pytest there.
+    # Otherwise, default discovery (tests inside the package) applies.
+    from grace.pipeline.orchestrate import relocated_tests_path
+
+    relocated = relocated_tests_path(ctx)
+    test_paths = [relocated] if relocated is not None and relocated.is_dir() else None
     pytest_report = run_pytest_with_cov(
-        target=result.output_dir, json_report_path=coverage_json_path
+        target=result.output_dir,
+        test_paths=test_paths,
+        json_report_path=coverage_json_path,
     )
     rubric: RubricReport = score_rubric(
         ctx=ctx,

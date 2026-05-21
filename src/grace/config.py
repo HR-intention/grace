@@ -51,6 +51,20 @@ class PathsConfig(BaseModel):
     For src-layout consumers, set this to `src/lens/connectors` so the
     generated package is importable as `lens.connectors.<psp>`."""
 
+    tests_dir: str | None = None
+    """If set, Grace relocates the generated `tests/` subdirectory from
+    `<output_dir>/<psp>/tests/` to `<tests_dir>/<psp>/` after Claude writes
+    it. Useful when the consumer's existing test suite lives outside the
+    package (e.g., Lens has `tests/` at repo root and wants connector
+    tests under `tests/connectors/<psp>/`). The relocated tests still
+    import their connector via `lens.connectors.<psp>.connector`, which
+    works regardless of test-file location as long as the connector
+    package is installed editable.
+
+    Leave unset (the default) to keep tests inside the package at
+    `<output_dir>/<psp>/tests/`. Example value for Lens:
+    `tests/connectors`."""
+
 
 class GraceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

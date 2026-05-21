@@ -36,6 +36,12 @@ class GenerationContext:
     package directory so the reports don't end up committed alongside
     the source they describe."""
 
+    tests_dir: Path | None = None
+    """If set, the pipeline relocates `<output_dir>/tests/` to
+    `<tests_dir>/<psp_name>/` after Claude writes them but before gates
+    run. None keeps the canonical in-package layout. Resolved from
+    `paths.tests_dir` in the consumer config — see `PathsConfig`."""
+
 
 @dataclass(frozen=True)
 class GenerationResult:

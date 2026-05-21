@@ -60,3 +60,71 @@ def test_run_pytest_with_cov_no_tests(tmp_path: Path) -> None:
     pkg = _make_clean_pkg(tmp_path)
     report = run_pytest_with_cov(target=pkg)
     assert report.coverage_pct == 0.0 or report.coverage_pct is None
+
+
+def test_run_pytest_with_cov_passes_test_paths_to_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When `test_paths` is provided, pytest is invoked with those paths as
+    discovery roots while `--cov` still measures `target` (the package).
+    Captured via a subprocess.run stub so we don't depend on the surrounding
+    test rig's sys.path."""
+    import subprocess as _subprocess
+    from grace.pipeline import gates as gates_mod
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    external = tmp_path / "tests" / "connectors" / "demo"
+    external.mkdir(parents=True)
+
+    captured: dict[str, list[str]] = {}
+
+    class _FakeProc:
+        returncode = 0
+        stdout = "1 passed in 0.01s\n"
+        stderr = ""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> _FakeProc:
+        captured["cmd"] = list(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(gates_mod.subprocess, "run", fake_run)
+
+    run_pytest_with_cov(target=pkg, test_paths=[external])
+
+    cmd = captured["cmd"]
+    # --cov target is the package (coverage measures the right code)
+    cov_idx = cmd.index("--cov")
+    assert cmd[cov_idx + 1] == str(pkg)
+    # The external path is in the positional args
+    assert str(external) in cmd
+    # And the original package path is NOT used as a discovery root
+    # (the trailing positional in the legacy invocation)
+    assert cmd[-1] == str(external)
+
+
+def test_run_pytest_with_cov_defaults_test_paths_to_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When `test_paths` is omitted, pytest discovers tests from `target` —
+    the legacy in-package layout."""
+    from grace.pipeline import gates as gates_mod
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+
+    captured: dict[str, list[str]] = {}
+
+    class _FakeProc:
+        returncode = 0
+        stdout = "no tests ran in 0.01s\n"
+        stderr = ""
+
+    def fake_run(cmd: list[str], **kwargs: object) -> _FakeProc:
+        captured["cmd"] = list(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(gates_mod.subprocess, "run", fake_run)
+
+    run_pytest_with_cov(target=pkg)
+    assert captured["cmd"][-1] == str(pkg)

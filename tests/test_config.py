@@ -56,6 +56,7 @@ def test_paths_defaults() -> None:
     cfg = load_config(config_path=Path("/nonexistent"))
     assert cfg.paths.docs_dir == "connector_docs"
     assert cfg.paths.output_dir == "lens/connectors"
+    assert cfg.paths.tests_dir is None
 
 
 def test_paths_overridable(tmp_path: Path) -> None:
@@ -64,10 +65,12 @@ def test_paths_overridable(tmp_path: Path) -> None:
         "paths:\n"
         "  docs_dir: my_docs\n"
         "  output_dir: src/lens/connectors\n"
+        "  tests_dir: tests/connectors\n"
     )
     cfg = load_config(config_path=p)
     assert cfg.paths.docs_dir == "my_docs"
     assert cfg.paths.output_dir == "src/lens/connectors"
+    assert cfg.paths.tests_dir == "tests/connectors"
 
 
 def test_load_prefers_project_over_user(

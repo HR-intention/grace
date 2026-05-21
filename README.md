@@ -82,6 +82,10 @@ For a **src-layout** consumer like Lens (where the package root is
 ```bash
 cd /path/to/lens
 uv run grace config set paths.output_dir src/lens/connectors
+# Optional: relocate generated tests out of the package, into the consumer's
+# top-level tests/ tree (Lens-style). Without this, tests stay at
+# <output_dir>/<psp>/tests/ which would mean shipping them inside the package.
+uv run grace config set paths.tests_dir tests/connectors
 # Optional: change the docs snapshot dir too
 # uv run grace config set paths.docs_dir my_docs
 ```
@@ -92,16 +96,25 @@ That writes `<cwd>/.grace/config.yaml`. Verify with:
 uv run grace config show
 # → docs_dir   = connector_docs
 # → output_dir = src/lens/connectors
+# → tests_dir  = tests/connectors      (unset ⇒ tests stay in package)
 # Resolved at <cwd>:
 #   docs:    /path/to/lens/connector_docs/<psp>
 #   output:  /path/to/lens/src/lens/connectors/<psp>
+#   tests:   /path/to/lens/tests/connectors/<psp>
 ```
 
-Without this step, `output_dir` defaults to `lens/connectors` (flat layout
-at the repo root) — which is **outside the importable package** for
-src-layout repos, so `from lens.connectors.<psp> import ...` won't resolve
-to the generated code. Setting it to `src/lens/connectors` puts the
-generated package on the import path.
+Without `paths.output_dir`, the default `lens/connectors` (flat layout at
+the repo root) is **outside the importable package** for src-layout repos,
+so `from lens.connectors.<psp> import ...` won't resolve to the generated
+code. Setting it to `src/lens/connectors` puts the generated package on the
+import path.
+
+`paths.tests_dir`, when set, makes Grace move the generated `tests/`
+subtree from `<output_dir>/<psp>/tests/` to `<tests_dir>/<psp>/` after
+Claude writes them but before quality gates run. The relocated tests still
+import their connector via `lens.connectors.<psp>.connector` (which works
+regardless of test-file location once the package is installed editable),
+so coverage measurement is unaffected.
 
 The same config file accepts any of:
 
@@ -109,6 +122,7 @@ The same config file accepts any of:
 paths:
   docs_dir: connector_docs            # default; where fetch-docs writes
   output_dir: src/lens/connectors      # default is lens/connectors
+  tests_dir: tests/connectors          # default is unset (tests stay in package)
 claude_code:
   cli_path: null                       # null ⇒ auto-detect via `which claude`
   timeout_s: 6000                      # 100 min; raise for very complex PSPs

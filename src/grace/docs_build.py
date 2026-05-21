@@ -209,9 +209,14 @@ def introspect_connector(pkg_dir: Path) -> ConnectorSummary:
 # --------------------------------------------------------------------------
 
 
-def discover_connectors(lens_root: Path) -> list[Path]:
-    """Find every connector package under `<lens_root>/lens/connectors/`."""
-    connectors_dir = lens_root / "lens" / "connectors"
+def discover_connectors(lens_root: Path, connectors_subpath: str = "lens/connectors") -> list[Path]:
+    """Find every connector package under `<lens_root>/<connectors_subpath>/`.
+
+    `connectors_subpath` is consumer-configurable via `paths.output_dir` —
+    e.g., src-layout Lens checkouts set it to `src/lens/connectors`. Default
+    matches the original flat layout for backward compat.
+    """
+    connectors_dir = lens_root / connectors_subpath
     if not connectors_dir.is_dir():
         return []
     return sorted(
@@ -337,15 +342,21 @@ def render_connector_md(c: ConnectorSummary) -> str:
     return "\n".join(lines)
 
 
-def build_docs(*, lens_root: Path) -> DocsBuildResult:
-    """Discover every connector under lens_root and emit docs-generated/."""
-    pkgs = discover_connectors(lens_root)
+def build_docs(*, lens_root: Path, connectors_subpath: str = "lens/connectors") -> DocsBuildResult:
+    """Discover every connector under lens_root and emit docs-generated/.
+
+    `connectors_subpath` mirrors `paths.output_dir` from the consumer's
+    grace config (e.g., `src/lens/connectors` for src-layout Lens). The
+    docs catalog is written to `<lens_root>/docs-generated/` regardless.
+    """
+    pkgs = discover_connectors(lens_root, connectors_subpath)
     if not pkgs:
         raise GraceError(
             reason=GraceErrorReason.CONTEXT_BUNDLE_INVALID,
             detail=(
-                f"no connector packages under {lens_root}/lens/connectors/ — "
-                f"run `grace generate <psp>` first or check the working directory."
+                f"no connector packages under {lens_root}/{connectors_subpath}/ — "
+                f"run `grace generate <psp>` first or check `paths.output_dir` "
+                f"in `grace config show`."
             ),
         )
     connectors = [introspect_connector(p) for p in pkgs]

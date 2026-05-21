@@ -87,12 +87,19 @@ def assemble_context(
     grace_version: str,
     source_version: str,
     repo_root: Path,
+    tests_dir: Path | None = None,
 ) -> GenerationContext:
-    """Build the full GenerationContext for a generate run."""
+    """Build the full GenerationContext for a generate run.
+
+    `tests_dir`, when provided, is the absolute parent directory under which
+    the generated `tests/` subtree gets relocated (to `<tests_dir>/<psp>/`)
+    after Claude writes it. None keeps the in-package layout.
+    """
     output_dir = output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = (Path.cwd() / ".grace" / "runs" / psp_name).resolve()
     reports_dir.mkdir(parents=True, exist_ok=True)
+    resolved_tests_dir = tests_dir.expanduser().resolve() if tests_dir is not None else None
     return GenerationContext(
         psp_name=psp_name,
         rulebook_paths=default_rulebook_paths(repo_root=repo_root),
@@ -103,4 +110,5 @@ def assemble_context(
         grace_version=grace_version,
         source_version=source_version,
         reports_dir=reports_dir,
+        tests_dir=resolved_tests_dir,
     )

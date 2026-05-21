@@ -198,6 +198,20 @@ def _default_output_dir(psp: str, cfg: "GraceConfig | None" = None) -> Path:
     return Path.cwd() / cfg.paths.output_dir / psp
 
 
+def _resolved_tests_dir(cfg: "GraceConfig | None" = None) -> Path | None:
+    """`<cwd>/<paths.tests_dir>` if configured, else None.
+
+    The pipeline uses this to relocate the generated `tests/` subtree
+    from `<output_dir>/<psp>/tests/` to `<tests_dir>/<psp>/` so connector
+    tests can live alongside the consumer's existing test suite (e.g.,
+    Lens has `tests/` at repo root).
+    """
+    cfg = cfg if cfg is not None else load_config()
+    if cfg.paths.tests_dir is None:
+        return None
+    return Path.cwd() / cfg.paths.tests_dir
+
+
 @main.command()
 @click.argument("psp")
 @click.option(
@@ -238,11 +252,14 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
         source = str(default)
 
     out = output or _default_output_dir(psp, cfg)
+    tests_dir = _resolved_tests_dir(cfg)
 
     # Log resolved paths so the user always sees what's about to be read /
     # written. Avoids the "wait, where did the files go?" surprise.
     click.echo(f"→ Source: {source}")
     click.echo(f"→ Output: {out}")
+    if tests_dir is not None:
+        click.echo(f"→ Tests:  {tests_dir / psp}  (relocated from {out}/tests/)")
     click.echo(f"→ Lens version constraint: {cfg.lens.version_constraint}")
     click.echo()
 
@@ -262,6 +279,7 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
             grace_version=_grace_version(),
             source_version=source,
             repo_root=_repo_root(),
+            tests_dir=tests_dir,
         )
         runner = ClaudeCodeRunner(
             cli_path=cfg.claude_code.cli_path, timeout_s=cfg.claude_code.timeout_s
@@ -284,9 +302,14 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
 
         # Auto-refresh the consumer-side docs catalog so llms.txt stays in sync
         # with every successful generation. Best-effort: a docs-build failure
-        # shouldn't fail the generation.
+        # shouldn't fail the generation. The consumer's paths.output_dir tells
+        # us where the connector packages actually live (e.g. src/lens/connectors
+        # for src-layout Lens, not the default lens/connectors).
         try:
-            docs_result = build_docs(lens_root=Path.cwd())
+            docs_result = build_docs(
+                lens_root=Path.cwd(),
+                connectors_subpath=cfg.paths.output_dir,
+            )
             click.echo(
                 f"OK: refreshed {docs_result.output_root.relative_to(Path.cwd())} "
                 f"({len(docs_result.connectors)} connectors)"
@@ -363,14 +386,18 @@ def docs() -> None:
     """Build the consumer-side docs catalog (docs-generated/llms.txt + per-connector .md).
 
     Run from inside the consumer repo (e.g. Lens). Static-analyzes every
-    package under `<cwd>/lens/connectors/*/` and emits
+    connector package under `<cwd>/<paths.output_dir>/*/` and emits
     `<cwd>/docs-generated/llms.txt` plus one `.md` per connector. Idempotent.
 
     This is invoked automatically at the end of every successful `grace generate`,
     so most users won't need to run it directly.
     """
+    cfg = load_config()
     try:
-        result = build_docs(lens_root=Path.cwd())
+        result = build_docs(
+            lens_root=Path.cwd(),
+            connectors_subpath=cfg.paths.output_dir,
+        )
     except GraceError as e:
         raise _click_error_from_grace(e) from e
     click.echo(
@@ -439,6 +466,7 @@ def config_show_cmd() -> None:
     click.echo("  paths:")
     click.echo(f"    docs_dir:    {loaded.config.paths.docs_dir}")
     click.echo(f"    output_dir:  {loaded.config.paths.output_dir}")
+    click.echo(f"    tests_dir:   {loaded.config.paths.tests_dir or '(unset — tests stay in package)'}")
     click.echo("  claude_code:")
     click.echo(f"    cli_path:    {loaded.config.claude_code.cli_path or '(auto-detect)'}")
     click.echo(f"    timeout_s:   {int(loaded.config.claude_code.timeout_s)}")
@@ -451,9 +479,12 @@ def config_show_cmd() -> None:
     click.echo()
     docs_psp = _default_docs_dir("<psp>", loaded.config)
     out_psp = _default_output_dir("<psp>", loaded.config)
+    tests_root = _resolved_tests_dir(loaded.config)
     click.echo("Resolved at <cwd>:")
     click.echo(f"  docs:    {docs_psp}")
     click.echo(f"  output:  {out_psp}")
+    if tests_root is not None:
+        click.echo(f"  tests:   {tests_root / '<psp>'}")
 
 
 @config_group.command(name="set")
@@ -469,6 +500,7 @@ def config_set_cmd(key: str, value: str) -> None:
 
       grace config set paths.output_dir src/lens/connectors
       grace config set paths.docs_dir   connector_docs
+      grace config set paths.tests_dir  tests/connectors
       grace config set claude_code.timeout_s 9000
     """
     try:

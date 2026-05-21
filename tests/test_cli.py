@@ -227,9 +227,12 @@ def test_generate_uses_configured_output_dir(
         captured["output_dir"] = ctx.output_dir  # type: ignore[attr-defined]
 
     monkeypatch.setattr("grace.cli._run_pipeline", fake_run_pipeline)
-    monkeypatch.setattr("grace.cli.build_docs", lambda lens_root: type("R", (), {
-        "output_root": tmp_path / "docs-generated", "connectors": []
-    })())
+    monkeypatch.setattr(
+        "grace.cli.build_docs",
+        lambda lens_root, connectors_subpath="lens/connectors": type("R", (), {
+            "output_root": tmp_path / "docs-generated", "connectors": []
+        })(),
+    )
 
     spec = tmp_path / "docs"
     spec.mkdir()

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Protocol
 
 from grace.pipeline.marker import ensure_marker
@@ -19,19 +21,55 @@ class PipelineHooks:
     """Set False for tests that only exercise marker-ensure + orchestration."""
 
 
+def relocated_tests_path(ctx: GenerationContext) -> Path | None:
+    """Where the package's tests live after a (potential) relocation.
+
+    Returns `<ctx.tests_dir>/<psp_name>/` when `ctx.tests_dir` is set,
+    else None. Pure function over ctx — does not touch the filesystem.
+    Useful for tests + for `run_gates_blocking` to know where to point
+    pytest.
+    """
+    if ctx.tests_dir is None:
+        return None
+    return ctx.tests_dir / ctx.psp_name
+
+
+def _relocate_tests(ctx: GenerationContext) -> Path | None:
+    """If `ctx.tests_dir` is set, move `<output_dir>/tests/` to
+    `<tests_dir>/<psp_name>/`. Returns the new tests root, or None if
+    relocation wasn't configured / there were no tests to move.
+
+    Overwrites an existing destination so `grace regenerate` is idempotent.
+    """
+    dest = relocated_tests_path(ctx)
+    if dest is None:
+        return None
+    src = ctx.output_dir / "tests"
+    if not src.is_dir():
+        return None
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dest))
+    return dest
+
+
 async def run_pipeline(
     *,
     ctx: GenerationContext,
     runner: _RunnerProto,
     hooks: PipelineHooks = PipelineHooks(),
 ) -> GenerationResult:
-    """Three-step pipeline: context → invoke → gates.
+    """Four-step pipeline: invoke → marker → relocate-tests → gates.
 
     Context assembly happens upstream of this function (callers use
     grace.pipeline.context.assemble_context). This function:
       1. Calls runner.generate(ctx).
       2. Post-processes any emitted .py file missing a marker.
-      3. (Optional) runs quality gates — implemented in pipeline/gates.py.
+      3. If ctx.tests_dir is set, relocates `<output_dir>/tests/` to
+         `<tests_dir>/<psp>/` so generated tests live alongside the
+         consumer's existing test suite rather than inside the package.
+      4. (Optional) runs quality gates — implemented in pipeline/gates.py.
     """
     result = await runner.generate(ctx)
 
@@ -45,6 +83,8 @@ async def run_pipeline(
             grace_version=ctx.grace_version,
             source_uri=ctx.psp_docs.source_uri,
         )
+
+    _relocate_tests(ctx)
 
     if hooks.run_gates:
         from grace.pipeline.gates import run_gates_blocking
