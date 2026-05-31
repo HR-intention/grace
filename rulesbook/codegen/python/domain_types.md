@@ -1,200 +1,248 @@
 # Domain types (locked)
 
-These types live in `lens.domain_types` and `lens.enums`. **Import them; do not redefine them. Never widen an enum locally.** Verbatim from `SUBPROJECT_LENS.md` §4.4 + §4.6.
+These types live in `lens.domain_types` and `lens.enums`. **Import them; do not redefine
+them. Never widen an enum locally.** Lens 0.2.0 adds mandate types alongside the existing
+payment types.
 
-## Request/response models
+---
+
+## Payment types (`lens.domain_types`)
 
 ```python
-# lens/domain_types/__init__.py
-
-# Money.
-class Amount(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    minor_units: int
-    currency: Currency
-
-# Shared request fields used by every flow.
-class RequestCommon(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    merchant_id: str
-    order_id: str                                  # Orbit's order id (UUID)
-    customer_id: str | None = None
-    idempotency_key: str | None = None
-
-
-# create_order
-class CreateOrderRequest(RequestCommon):
-    amount: Amount
-    return_url: HttpUrl
-    allowed_methods: list[PaymentMethod] | None = None
-    expires_at: datetime | None = None             # PSP-side TTL
-    metadata: dict[str, str] = Field(default_factory=dict)
-
-class CreateOrderResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=False)
-    psp_order_id: str
-    payment_link: HttpUrl
-    status: OrderStatus                            # typically OrderStatus.CREATED
-    expires_at: datetime | None = None
-
-
-# Per-attempt model — returned in lists by sync_payment, individually by webhooks.
-class PaymentAttempt(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    psp_payment_id: str
-    status: PaymentAttemptStatus                   # PENDING | SUCCESS | FAILED
-    method_used: PaymentMethod | None = None       # populated post-attempt
-    amount: Amount | None = None                   # PSP may not report until SUCCESS
-    failure_code: PaymentFailureCode | None = None # populated on FAILED (or PENDING-in-review)
-    failure_reason: str | None = None              # human-readable; PSP raw text
-    attempted_at: datetime                         # PSP-reported timestamp
-    raw: dict[str, Any] = Field(default_factory=dict)
-
-
-# sync_payment
-class SyncPaymentRequest(RequestCommon):
-    psp_order_id: str
-
-class SyncPaymentResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=False)
-    psp_order_id: str
-    status: OrderStatus                            # the order's overall status
-    paid_amount: int | None = None                 # populated when at least one attempt succeeded
-    attempts: list[PaymentAttempt] = Field(default_factory=list)
-
-
-# refund
-class RefundRequest(RequestCommon):
-    psp_payment_id: str                            # the successful attempt to refund against
-    refund_id: str                                 # Orbit's refund id
-    amount_to_refund: int | None = None            # None ⇒ full
-    reason: str | None = None
-
-class RefundResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=False)
-    psp_refund_id: str
-    status: RefundStatus
-    refunded_amount: int | None = None
-
-
-# sync_refund
-class SyncRefundRequest(RequestCommon):
-    psp_refund_id: str
-
-class SyncRefundResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=False)
-    psp_refund_id: str
-    status: RefundStatus
-    refunded_amount: int | None = None
-    failure_reason: str | None = None
-
-
-# Refund-side event for webhooks.
-class RefundEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    psp_refund_id: str
-    psp_payment_id: str                            # which attempt was refunded
-    psp_order_id: str | None = None
-    status: RefundStatus
-    refunded_amount: int | None = None
-    failure_reason: str | None = None
-
-
-# Webhook — one event from the PSP, normalized.
-class WebhookEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    event_type: WebhookEventType
-    psp_event_id: str                              # for dedup (Orbit-side)
-    psp_order_id: str | None = None
-    attempt: PaymentAttempt | None = None          # populated for PAYMENT_* events
-    refund:  RefundEvent     | None = None         # populated for REFUND_* events
-    raw_payload: dict[str, Any]
+from lens.domain_types import (
+    Amount,
+    RequestCommon,
+    CreateOrderRequest, CreateOrderResponse,
+    PaymentAttempt,
+    SyncPaymentRequest, SyncPaymentResponse,
+    RefundRequest, RefundResponse,
+    SyncRefundRequest, SyncRefundResponse,
+    RefundEvent,
+    PaymentWebhookEvent,
+)
 ```
 
-## Enums (all locked, additive-only)
+All payment request/response models are unchanged from lens 0.1. See the field reference
+in `pitfalls.md` §4a for the exact kwargs — they have `extra="forbid"` and incorrect
+kwargs raise a `ValidationError` at runtime.
+
+---
+
+## Mandate types (`lens.domain_types`)
+
+The mandate types are also exported from `lens.domain_types` (re-exported from
+`lens.domain_types.mandates`). Never import from `lens.domain_types.mandates` directly.
 
 ```python
-# lens/enums/__init__.py
+from lens.domain_types import (
+    CustomerContact,
+    MandateRequestCommon,
+    CreateSubscriptionRequest,
+    CreateSubscriptionResponse,
+    ApprovalHandle,
+    SyncSubscriptionRequest,
+    SyncSubscriptionResponse,
+    MandateDebitOutcome,
+    ManageMandateRequest,
+    ManageMandateResponse,
+    MandateWebhookEvent,
+)
+```
 
-class Currency(StrEnum):
-    INR = "INR"; USD = "USD"; EUR = "EUR"; GBP = "GBP"
-    # additive
+### Key mandate request/response shapes
 
-class PaymentMethod(StrEnum):
-    CARD = "CARD"
-    UPI = "UPI"
-    WALLET = "WALLET"
-    BANK_TRANSFER = "BANK_TRANSFER"
-    BANK_REDIRECT = "BANK_REDIRECT"
+```python
+class CustomerContact(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    email: str
+    phone: str
 
-class OrderStatus(StrEnum):
-    CREATED = "CREATED"
-    PAID = "PAID"
-    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
-    REFUNDED = "REFUNDED"
+
+class MandateRequestCommon(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    merchant_id: str    # NOTE: NO order_id (mandates are not orders)
+
+
+class CreateSubscriptionRequest(MandateRequestCommon):
+    idempotency_key: str           # REQUIRED — forward as PSP idempotency token
+    rail: MandateRail
+    customer_ref: str
+    customer_contact: CustomerContact   # REQUIRED — email + phone both required
+    amount: Amount
+    max_amount: Amount
+    interval_type: MandateIntervalType
+    interval_count: int = 1
+    first_charge_at: datetime | None = None   # periodic-only: first debit time
+    expires_at: datetime
+    max_cycles: int | None = None
+    description: str
+    return_url: HttpUrl
+    upi_vpa: Maskable[str] | None = None
+
+
+class CreateSubscriptionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=False)
+    psp_mandate_ref: str           # PSP's mandate/subscription reference
+    status: MandateStatus
+    approval: ApprovalHandle       # REDIRECT / UPI_INTENT / UPI_COLLECT / UPI_QR
+    raw: dict[str, Any] | None = None
+
+
+class SyncSubscriptionRequest(MandateRequestCommon):
+    psp_mandate_ref: str
+
+
+class SyncSubscriptionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=False)
+    status: MandateStatus
+    next_charge_at: datetime | None = None
+    last_debit: MandateDebitOutcome | None = None
+    raw: dict[str, Any] | None = None
+
+
+class ManageMandateRequest(MandateRequestCommon):
+    idempotency_key: str           # REQUIRED on all three lifecycle ops
+    psp_mandate_ref: str
+    reason: str | None = None
+    effective_at: datetime | None = None   # resume: schedule activation time
+
+
+class ManageMandateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=False)
+    status: MandateStatus
+    raw: dict[str, Any] | None = None
+
+
+class MandateDebitOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    psp_debit_id: str
+    psp_mandate_ref: str
+    status: MandateDebitStatus
+    amount: Amount
+    failure_code: PaymentFailureCode | None = None
+    occurred_at: datetime
+    psp_attempt: int | None = None   # retry count for periodic-mode finality
+
+
+class MandateWebhookEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    event_type: WebhookEventType        # from MANDATE_* range
+    psp_mandate_ref: str
+    psp_event_id: str
+    occurred_at: datetime
+    mandate_status: MandateStatus | None = None
+    debit: MandateDebitOutcome | None = None
+    raw: dict[str, Any]
+```
+
+---
+
+## Enums (`lens.enums`)
+
+All enums are locked and additive-only. Import from `lens.enums`; never redefine locally.
+
+```python
+from lens.enums import (
+    Currency, PaymentMethod, OrderStatus,
+    PaymentAttemptStatus, RefundStatus,
+    PaymentFailureCode, WebhookEventType,
+    ConnectorErrorReason,
+    # Mandate-specific:
+    MandateRail, MandateStatus, MandateIntervalType, MandateDebitStatus,
+    FailureClass, FAILURE_CLASS,
+)
+```
+
+### Mandate-specific enums (new in lens 0.2.0)
+
+```python
+class MandateRail(StrEnum):
+    UPI_AUTOPAY = "UPI_AUTOPAY"
+    CARD_EMANDATE = "CARD_EMANDATE"
+
+class MandateStatus(StrEnum):
+    PENDING_AUTHORIZATION = "PENDING_AUTHORIZATION"
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    SUSPENDED = "SUSPENDED"
+    CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
+    COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
-class PaymentAttemptStatus(StrEnum):
-    PENDING = "PENDING"
-    SUCCESS = "SUCCESS"
-    FAILED = "FAILED"
+class MandateIntervalType(StrEnum):
+    DAY = "DAY"; WEEK = "WEEK"; MONTH = "MONTH"; YEAR = "YEAR"
 
-class RefundStatus(StrEnum):
-    PENDING = "PENDING"
-    SUCCESS = "SUCCESS"
-    FAILED = "FAILED"
+class MandateDebitStatus(StrEnum):
+    PENDING = "PENDING"; SUCCESS = "SUCCESS"; FAILED = "FAILED"
 
-class PaymentFailureCode(StrEnum):
-    USER_DROPPED = "USER_DROPPED"
-    USER_CANCELLED = "USER_CANCELLED"
-    CARD_DECLINED = "CARD_DECLINED"
-    INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
-    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
-    FRAUD_BLOCKED = "FRAUD_BLOCKED"
-    FRAUD_REVIEW_PENDING = "FRAUD_REVIEW_PENDING"   # status=PENDING during review
-    INVALID_INSTRUMENT = "INVALID_INSTRUMENT"
-    PSP_ERROR = "PSP_ERROR"
-    NETWORK_ERROR = "NETWORK_ERROR"
-    UNKNOWN = "UNKNOWN"
+class FailureClass(StrEnum):
+    RETRIABLE = "RETRIABLE"
+    TERMINAL = "TERMINAL"
+```
 
+### `FAILURE_CLASS` — published data, not logic
+
+```python
+from lens.enums import FAILURE_CLASS, FailureClass, PaymentFailureCode
+
+# FAILURE_CLASS: Mapping[PaymentFailureCode, FailureClass]
+# A frozen mapping published by lens. Import it; never redeclare it.
+# The connector sets failure_code only. Orbit reads FAILURE_CLASS[code].
+# Lens never branches on FailureClass.
+```
+
+`FAILURE_CLASS` maps each `PaymentFailureCode` to `RETRIABLE` or `TERMINAL`. The connector
+sets `MandateDebitOutcome.failure_code`; Orbit looks up `FAILURE_CLASS[code]` to decide
+charge-failed vs charge-failed-final. See `status_mapping.md` §4 for the methodology.
+
+### Extended `WebhookEventType` (mandate events added)
+
+```python
 class WebhookEventType(StrEnum):
-    PAYMENT_INITIATED = "PAYMENT_INITIATED"        # rare; some PSPs emit pending events
+    # Payment events (unchanged)
+    PAYMENT_INITIATED = "PAYMENT_INITIATED"
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     PAYMENT_FAILED = "PAYMENT_FAILED"
     ORDER_EXPIRED = "ORDER_EXPIRED"
     REFUND_SUCCESS = "REFUND_SUCCESS"
     REFUND_FAILED = "REFUND_FAILED"
-
-class ConnectorErrorReason(StrEnum):
-    INVALID_REQUEST = "INVALID_REQUEST"
-    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
-    AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED"
-    RATE_LIMITED = "RATE_LIMITED"
-    PSP_UNAVAILABLE = "PSP_UNAVAILABLE"
-    PSP_TIMEOUT = "PSP_TIMEOUT"
-    ORDER_NOT_FOUND = "ORDER_NOT_FOUND"
-    PAYMENT_NOT_FOUND = "PAYMENT_NOT_FOUND"
-    REFUND_NOT_FOUND = "REFUND_NOT_FOUND"
-    INVALID_ORDER_STATE = "INVALID_ORDER_STATE"
-    WEBHOOK_SIGNATURE_FAILED = "WEBHOOK_SIGNATURE_FAILED"
-    NOT_SUPPORTED = "NOT_SUPPORTED"
-    INCOMPATIBLE_VERSION = "INCOMPATIBLE_VERSION"
-    INTERNAL = "INTERNAL"
+    # Mandate lifecycle events (new in 0.2.0)
+    MANDATE_AUTHORIZED = "MANDATE_AUTHORIZED"
+    MANDATE_REJECTED = "MANDATE_REJECTED"
+    MANDATE_PAUSED = "MANDATE_PAUSED"
+    MANDATE_RESUMED = "MANDATE_RESUMED"
+    MANDATE_CANCELLED = "MANDATE_CANCELLED"
+    MANDATE_REVOKED = "MANDATE_REVOKED"
+    MANDATE_SUSPENDED = "MANDATE_SUSPENDED"
+    MANDATE_EXPIRED = "MANDATE_EXPIRED"
+    MANDATE_COMPLETED = "MANDATE_COMPLETED"
+    MANDATE_DEBIT_SUCCESS = "MANDATE_DEBIT_SUCCESS"
+    MANDATE_DEBIT_FAILED = "MANDATE_DEBIT_FAILED"
+    MANDATE_DEBIT_NOTIFIED = "MANDATE_DEBIT_NOTIFIED"
+    MANDATE_EXPIRING_SOON = "MANDATE_EXPIRING_SOON"
 ```
 
-## Common types
+### Extended `PaymentFailureCode` (mandate codes added)
 
 ```python
-# lens/common/__init__.py
+# New codes in 0.2.0 (mandate debit failures):
+PaymentFailureCode.MANDATE_REVOKED
+PaymentFailureCode.MANDATE_PAUSED
+PaymentFailureCode.MANDATE_EXPIRED
+PaymentFailureCode.MANDATE_NOT_FOUND
+PaymentFailureCode.DEBIT_LIMIT_EXCEEDED
+```
 
-T = TypeVar("T")
-class Maskable(Generic[T]):
-    def __init__(self, value: T): ...
-    def expose(self) -> T: ...
-    def __repr__(self) -> str: return "***"
-    def __str__(self) -> str: return "***"
+These new codes are used in `MandateDebitOutcome.failure_code`. The full list is in
+`lens.enums` — import from there, never invent new values.
 
+---
+
+## Common types (`lens.common`)
+
+```python
+from lens.common import Maskable, ConnectorError, ConnectorErrorReason
 
 class ConnectorError(Exception):
     def __init__(
@@ -206,9 +254,21 @@ class ConnectorError(Exception):
     ): ...
 ```
 
+`ConnectorErrorReason` is the same set as in 0.1; no new values in 0.2.0.
+
+---
+
 ## Rules
 
-- **All money fields on the public surface are integer minor units.** `amount.minor_units` is an `int`. `paid_amount`, `refunded_amount`, `amount_to_refund` are `int`. PSP wire-level transformations may use `decimal.Decimal` inside the connector method, but Decimal never crosses back into a domain type. (Ground rule 10.)
-- **No `Any` in domain payloads** — the `raw` and `raw_payload` `dict[str, Any]` fields are the only exceptions, kept for debug/replay only.
-- **`extra="forbid"` everywhere** so unexpected wire-level fields fail validation at the boundary.
-- **`PaymentMethod` is an allow-list constraint**, not a per-method request builder. v1 hosted-checkout never sees raw card/UPI/wallet payloads.
+- **All money fields on the public surface are integer minor units.** `Amount.minor_units`
+  is an `int`. `MandateDebitOutcome.amount` is `Amount`. `Decimal` may be used inside a
+  connector method for intermediate arithmetic but must never cross back into a domain type.
+- **No `Any` in domain payloads** except the designated `raw` / `raw_payload` / `raw: dict`
+  fields kept for debug/replay only.
+- **`extra="forbid"` everywhere** — unexpected wire-level fields fail at the boundary.
+- **`MandateRequestCommon` has no `order_id`** — mandates are not orders. Every mandate
+  request inherits only `merchant_id` (plus its own fields).
+- **`idempotency_key` is REQUIRED on `CreateSubscriptionRequest` and `ManageMandateRequest`**
+  (cancel/pause/resume). It must be forwarded to the PSP as the idempotency token.
+- **`CustomerContact.email` and `.phone` are both required** — PSPs need them for RBI
+  pre-debit notifications. Do not omit either.

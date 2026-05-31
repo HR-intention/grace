@@ -8,7 +8,7 @@ These rules are inherited verbatim from `SUBPROJECT_LENS.md` §3. **Violations f
 
 3. **Async everywhere.** Every public method on `PaymentsFacade` and `Connector` is `async def`. CPU work via `asyncio.to_thread`.
 
-4. **One class per PSP.** Each `Connector` subclass implements all four flow methods + `handle_webhook` + `close`. No per-(PSP × Flow) class splits.
+4. **Domain-modular, one registered class per PSP.** Each PSP has per-capability mixin classes (`<Psp>Orders(_<Psp>Base, PaymentsConnector)`, `<Psp>Subscriptions(_<Psp>Base, MandateConnector)`) composed into one registered `<Psp>Connector`. Webhooks are handled by a shared `WebhookRouter`, not a connector method. Never a bare `Connector` subclass.
 
 5. **Each Connector owns its httpx client.** Created in `__init__`, closed in `close()`. Configured with timeouts, retries, and a structured-logging event hook. Tests pass `httpx.MockTransport` at construction.
 
@@ -28,7 +28,7 @@ These rules are inherited verbatim from `SUBPROJECT_LENS.md` §3. **Violations f
 
 13. **Idempotency keys pass through, never persist.** Lens forwards the caller-supplied key to the PSP. Dedup is Orbit's job.
 
-14. **Webhook = verify + parse, nothing else.** `Connector.handle_webhook` verifies the signature, parses the body into a `WebhookEvent` (with `attempt` or `refund` populated), returns it.
+14. **Webhook = verify + classify + parse, nothing else.** The shared `WebhookRouter` (built from `WebhookHandlers`) verifies the signature, classifies the event family (`PAYMENT`/`MANDATE`), dispatches to the matching domain parser, and returns a typed event. Dedup is Orbit's job — the router just verifies + parses.
 
 15. **The `__init__.py` in each `connectors/<psp>/` package self-registers with `ConnectorFactory` on import.**
 
