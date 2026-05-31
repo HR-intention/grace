@@ -116,17 +116,28 @@ DOMAIN_INCLUDE_GLOBS: dict[str, tuple[str, ...]] = {
     ),
 }
 # subscriptionsv1 (legacy, body-embedded sig) is never wanted.
+# Intentional self-contained subset of DEFAULT_EXCLUDE_GLOBS — kept independent
+# so filter_urls_by_domain doesn't pull in the payments-tuned default excludes.
 LEGACY_EXCLUDE_GLOBS: tuple[str, ...] = ("*subscriptionsv1*", "*previous/*", "*v2022-*", "*v2023-*", "*v2024-*")
 
 
 def _domain_includes(domain: str) -> tuple[str, ...]:
     if domain == "all":
-        merged = set(SHARED_INCLUDE_GLOBS)
+        # Order-preserving de-dupe: SHARED first, then each domain in dict order.
+        seen: set[str] = set()
+        result: list[str] = []
+        for g in SHARED_INCLUDE_GLOBS:
+            if g not in seen:
+                seen.add(g)
+                result.append(g)
         for globs in DOMAIN_INCLUDE_GLOBS.values():
-            merged.update(globs)
-        return tuple(sorted(merged))
+            for g in globs:
+                if g not in seen:
+                    seen.add(g)
+                    result.append(g)
+        return tuple(result)
     if domain not in DOMAIN_INCLUDE_GLOBS:
-        raise GraceError(reason=GraceErrorReason.SOURCE_FETCH_FAILED, detail=f"unknown domain {domain!r}")
+        raise GraceError(reason=GraceErrorReason.CONFIG_INVALID, detail=f"unknown domain {domain!r}")
     return SHARED_INCLUDE_GLOBS + DOMAIN_INCLUDE_GLOBS[domain]
 
 
@@ -135,8 +146,11 @@ def filter_urls_by_domain(urls: list[str], *, domain: str) -> list[str]:
 
 
 def bucket_for_url(url: str) -> str:
+    # Check subscriptions before orders: a subscription payment/webhook page
+    # matches both domains' globs, and subscriptions is the more specific bucket.
     path = _path_of(url)
-    for dom, globs in DOMAIN_INCLUDE_GLOBS.items():
+    for dom in ("subscriptions", "orders"):
+        globs = DOMAIN_INCLUDE_GLOBS[dom]
         if any(fnmatch.fnmatch(path, g) for g in globs):
             return dom
     return "_shared"

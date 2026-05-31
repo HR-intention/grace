@@ -1,3 +1,6 @@
+import pytest
+
+from grace.errors import GraceError
 from grace.fetch_docs import bucket_for_url, filter_urls_by_domain
 
 URLS = [
@@ -38,3 +41,15 @@ def test_bucket_for_url() -> None:
     assert bucket_for_url("https://x/docs/api-reference/payments/latest/orders/create.md") == "orders"
     assert bucket_for_url("https://x/docs/api-reference/subscription/mandate/create.md") == "subscriptions"
     assert bucket_for_url("https://x/docs/api-reference/authentication.md") == "_shared"
+
+
+def test_bucket_subscriptions_beats_orders_for_overlap_url() -> None:
+    # A subscription payment/webhook page matches both *subscription/* and
+    # *payments*webhook*; subscriptions must win (more specific bucket).
+    url = "https://x/docs/api-reference/subscription/payments/webhook.md"
+    assert bucket_for_url(url) == "subscriptions"
+
+
+def test_filter_urls_by_domain_raises_on_unknown_domain() -> None:
+    with pytest.raises(GraceError):
+        filter_urls_by_domain(URLS, domain="bogus")
