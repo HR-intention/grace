@@ -91,12 +91,12 @@ def test_derive_filename_numbered_and_flat() -> None:
 def test_fetch_docs_writes_filtered_files(tmp_path: Path) -> None:
     llms_txt_url = "https://example.com/docs/llms.txt"
 
-    # domain="all" (the new default) includes overview-ts (no *-ts* exclude in
-    # LEGACY_EXCLUDE_GLOBS) and subscription/mandate pages, so we serve them all.
+    # domain="all" drops *overview-ts* (matched by *overview-ts* / *-ts* exclude)
+    # and the previous/* URL, so 6 of 8 are kept.  subscription/mandate is kept
+    # because *mandate* and *setup-mandate* are dropped from DOMAIN_EXCLUDE_GLOBS.
     served: dict[str, bytes] = {
         llms_txt_url: SAMPLE_LLMS_TXT.encode(),
         "https://www.cashfree.com/docs/api-reference/authentication.md": b"# auth",
-        "https://www.cashfree.com/docs/api-reference/integration-troubleshooting/overview-ts.md": b"# ts",
         "https://www.cashfree.com/docs/api-reference/payments/latest/orders/create.md": b"# create",
         "https://www.cashfree.com/docs/api-reference/payments/latest/orders/get.md": b"# get",
         "https://www.cashfree.com/docs/api-reference/payments/latest/subscription/mandate/create.md": b"# mandate",
@@ -126,9 +126,9 @@ def test_fetch_docs_writes_filtered_files(tmp_path: Path) -> None:
     assert any("refunds_create" in n for n in names)
     assert any("refunds_webhooks" in n for n in names)
     assert any("authentication" in n for n in names)
-    # 8 URLs in sample; domain="all" drops only the previous/* URL → 7 kept, 1 skipped.
-    assert len(result.files_written) == 7
-    assert result.skipped_count == 1
+    # 8 URLs in sample; domain="all" drops overview-ts.md and previous/* → 6 kept, 2 skipped.
+    assert len(result.files_written) == 6
+    assert result.skipped_count == 2
     # Files are bucketed: orders/ subscriptions/ _shared/ subdirs exist.
     assert (out / "orders").is_dir()
     assert (out / "subscriptions").is_dir()
@@ -189,8 +189,8 @@ def test_fetch_docs_reads_local_llms_txt(tmp_path: Path) -> None:
         client=client,
     )
     client.close()
-    # domain="all" (default) keeps 7 of 8 URLs; only previous/* is dropped.
-    assert len(result.files_written) == 7
+    # domain="all" (default) keeps 6 of 8 URLs; overview-ts.md + previous/* are dropped.
+    assert len(result.files_written) == 6
     # Files land in bucket subdirs, not flat in output_dir.
     assert (out / "orders").is_dir()
     assert (out / "subscriptions").is_dir()

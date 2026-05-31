@@ -112,6 +112,7 @@ def test_fetch_docs_cli_writes_output(monkeypatch: pytest.MonkeyPatch, tmp_path:
         output_dir: Path,
         include: object,
         exclude: object,
+        domain: object = "all",
     ) -> object:
         captured["psp_name"] = psp_name
         captured["source"] = source
@@ -433,9 +434,11 @@ def test_fetch_docs_cli_defaults_include_when_unset(
         output_dir: Path,
         include: object,
         exclude: object,
+        domain: object = "all",
     ) -> object:
         captured["include"] = include
         captured["exclude"] = exclude
+        captured["domain"] = domain
 
         out_dir = output_dir
 
@@ -454,3 +457,4 @@ def test_fetch_docs_cli_defaults_include_when_unset(
     assert result.exit_code == 0, result.output
     assert captured["include"] is None
     assert captured["exclude"] is None
+    assert captured["domain"] == "all"

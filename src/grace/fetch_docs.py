@@ -115,10 +115,13 @@ DOMAIN_INCLUDE_GLOBS: dict[str, tuple[str, ...]] = {
         "*subscription/payment*", "*subscription*webhook*",
     ),
 }
-# subscriptionsv1 (legacy, body-embedded sig) is never wanted.
-# Intentional self-contained subset of DEFAULT_EXCLUDE_GLOBS — kept independent
-# so filter_urls_by_domain doesn't pull in the payments-tuned default excludes.
-LEGACY_EXCLUDE_GLOBS: tuple[str, ...] = ("*subscriptionsv1*", "*previous/*", "*v2022-*", "*v2023-*", "*v2024-*")
+# Per spec R1: the domain fetch drops ONLY the subscription/mandate-blocking
+# excludes from DEFAULT_EXCLUDE_GLOBS, keeping *subscriptionsv1* + every
+# out-of-scope feature exclude. (Do not reintroduce a hand-rolled subset.)
+DOMAIN_EXCLUDE_GLOBS: tuple[str, ...] = tuple(
+    g for g in DEFAULT_EXCLUDE_GLOBS
+    if g not in {"*subscription/*", "*mandate*", "*setup-mandate*"}
+)
 
 
 def _domain_includes(domain: str) -> tuple[str, ...]:
@@ -142,7 +145,7 @@ def _domain_includes(domain: str) -> tuple[str, ...]:
 
 
 def filter_urls_by_domain(urls: list[str], *, domain: str) -> list[str]:
-    return filter_urls(urls, include=list(_domain_includes(domain)), exclude=list(LEGACY_EXCLUDE_GLOBS))
+    return filter_urls(urls, include=list(_domain_includes(domain)), exclude=list(DOMAIN_EXCLUDE_GLOBS))
 
 
 def bucket_for_url(url: str) -> str:
