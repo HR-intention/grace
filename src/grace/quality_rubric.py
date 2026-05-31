@@ -451,6 +451,212 @@ def _score_public_surface(ctx: GenerationContext, output_dir: Path) -> Dimension
     return Dimension("public_surface", 20, 20 - penalty, "; ".join(issues[:5]))
 
 
+# ---------------------------------------------------------------------------
+# Domain-modular public-surface scorer (v2) — T13
+# ---------------------------------------------------------------------------
+
+# Always-required files for a 0.2.0 domain-modular package.
+_V2_CORE_FILES = [
+    "core/base.py",
+    "core/auth.py",
+    "core/status.py",
+    "core/models.py",
+    "connector.py",
+    "webhooks.py",
+    "__init__.py",
+]
+
+# Per-domain required files (relative to pkg/<domain>/).
+_V2_DOMAIN_FILES = {
+    "orders": ["connector.py", "status_map.py", "webhooks.py"],
+    "subscriptions": ["connector.py", "status_map.py", "webhooks.py"],
+}
+
+# Per-domain required methods (must be resolvable across the registered class's MRO).
+_V2_DOMAIN_METHODS: dict[str, list[str]] = {
+    "orders": [
+        "create_order",
+        "sync_payment",
+        "refund",
+        "sync_refund",
+        "supported_methods",
+        "supports_idempotency_key",
+    ],
+    "subscriptions": [
+        "create_subscription",
+        "sync_subscription",
+        "cancel_subscription",
+        "pause_subscription",
+        "resume_subscription",
+        "supported_mandate_rails",
+        "supports_pause",
+        "supported_intervals",
+        "max_mandate_amount",
+    ],
+}
+
+# The known set of domains (in iteration order — future-proof against new ones).
+_KNOWN_DOMAINS = ("orders", "subscriptions")
+
+
+def _build_class_methods_map(pkg: Path) -> dict[str, set[str]]:
+    """AST-parse every ``*.py`` under *pkg* and return a mapping
+    ``{class_name: {method_name, ...}}``.
+
+    When the same class name appears in multiple files the method sets are
+    *merged* (union) — this handles the case where a mixin adds methods that
+    are defined in a different file from the class's primary definition.
+    Properties and regular/async methods are all collected (the rubric
+    checks names, not call-style).
+    """
+    result: dict[str, set[str]] = {}
+    for py_file in pkg.rglob("*.py"):
+        try:
+            text = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            methods: set[str] = set()
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    methods.add(member.name)
+            if node.name not in result:
+                result[node.name] = methods
+            else:
+                result[node.name] |= methods
+    return result
+
+
+def _all_methods_in_mro(start: str, bases_map: dict[str, list[str]], methods_map: dict[str, set[str]]) -> set[str]:
+    """Collect all method names reachable from *start* via BFS through
+    *bases_map*, merging method sets from *methods_map* at each class.
+
+    External names (e.g. ``PaymentsConnector``) that are not in *methods_map*
+    are silently skipped — they live outside the package.
+    """
+    seen: set[str] = set()
+    queue: deque[str] = deque([start])
+    all_methods: set[str] = set()
+    while queue:
+        name = queue.popleft()
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in methods_map:
+            all_methods |= methods_map[name]
+        for base in bases_map.get(name, []):
+            if base not in seen:
+                queue.append(base)
+    return all_methods
+
+
+def _check_init_registration(init_text: str) -> list[str]:
+    """Return issues with the __init__.py registration block.
+
+    Checks:
+    - ``ConnectorFactory.register(...)`` is present.
+    - ``ConnectorFactory.register_webhook(...)`` is present.
+    """
+    issues: list[str] = []
+    if "ConnectorFactory.register(" not in init_text:
+        issues.append("__init__.py: does not call ConnectorFactory.register")
+    if "ConnectorFactory.register_webhook(" not in init_text:
+        issues.append("__init__.py: does not call ConnectorFactory.register_webhook")
+    return issues
+
+
+def _check_webhooks_exports(pkg: Path) -> list[str]:
+    """Return issues with the root webhooks.py export."""
+    webhooks_py = pkg / "webhooks.py"
+    if not webhooks_py.is_file():
+        return ["webhooks.py: missing"]
+    text = webhooks_py.read_text(encoding="utf-8", errors="replace")
+    if "build_webhook_handlers" not in text:
+        return ["webhooks.py: does not define/export build_webhook_handlers"]
+    return []
+
+
+def _score_public_surface_v2(pkg: Path) -> Dimension:
+    """Score the public surface of a domain-modular 0.2.0 connector package.
+
+    Checks (in order):
+    1.  Registered class composes ≥1 capability interface (reuses composition_findings).
+    2.  Required core files always present.
+    3.  Per-present-domain required files.
+    4.  Per-present-domain required methods (resolved transitively via MRO BFS).
+    5.  __init__.py calls both register + register_webhook.
+    6.  root webhooks.py exports build_webhook_handlers.
+
+    Absent domains are NOT penalized (Cross-Cutting C1).
+    Score starts at max 20; each issue docks a penalty; clamped ≥ 0.
+    """
+    issues: list[str] = []
+
+    # 1. Capability-interface composition.
+    comp = composition_findings(pkg)
+    issues.extend(comp)
+
+    # 2. Core required files.
+    for rel in _V2_CORE_FILES:
+        if not (pkg / rel).is_file():
+            issues.append(f"missing {rel}")
+
+    # 3 & 4. Per-domain checks (only for domains whose directory is present).
+    present_domains = [d for d in _KNOWN_DOMAINS if (pkg / d).is_dir()]
+
+    # Pre-build method resolution data once (shared across domains).
+    bases_map = _build_class_bases_map(pkg)
+    methods_map = _build_class_methods_map(pkg)
+
+    # Resolve the registered class name for MRO traversal.
+    registered_name: str | None = None
+    init_py = pkg / "__init__.py"
+    if init_py.is_file():
+        registered_name = _extract_register_class_name(
+            init_py.read_text(encoding="utf-8", errors="replace")
+        )
+
+    mro_methods: set[str] = set()
+    if registered_name:
+        mro_methods = _all_methods_in_mro(registered_name, bases_map, methods_map)
+
+    for domain in present_domains:
+        domain_dir = pkg / domain
+        # 3. Domain file presence.
+        for rel in _V2_DOMAIN_FILES.get(domain, []):
+            if not (domain_dir / rel).is_file():
+                issues.append(f"missing {domain}/{rel}")
+        # 4. Domain method presence (resolved across MRO).
+        for method in _V2_DOMAIN_METHODS.get(domain, []):
+            if method not in mro_methods:
+                issues.append(f"{domain}: missing method {method}")
+
+    # 5. Registration checks.
+    if init_py.is_file():
+        init_text = init_py.read_text(encoding="utf-8", errors="replace")
+        issues.extend(_check_init_registration(init_text))
+
+    # 6. Root webhooks.py exports build_webhook_handlers.
+    issues.extend(_check_webhooks_exports(pkg))
+
+    if not issues:
+        return Dimension(
+            "public_surface",
+            20,
+            20,
+            "all required files + methods + registration present",
+        )
+
+    # Build detail from the first few issues; mention every missing method name
+    # explicitly so tests can grep for them.
+    penalty = min(20, 4 * len(issues))
+    detail = "; ".join(issues[:5])
+    return Dimension("public_surface", 20, max(0, 20 - penalty), detail)
+
+
 def _score_error_handling(output_dir: Path) -> Dimension:
     issues: list[str] = []
     connector_py = output_dir / "connector.py"
@@ -507,7 +713,7 @@ def score_rubric(
             _score_marker(output_dir),
             _score_type_correctness(mypy_report),
             _score_coverage(pytest_report),
-            _score_public_surface(ctx, output_dir),
+            _score_public_surface_v2(output_dir),
             _score_error_handling(output_dir),
             _score_pii_discipline(output_dir),
         ]
