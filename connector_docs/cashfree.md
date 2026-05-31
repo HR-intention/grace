@@ -1,244 +1,122 @@
-### Connector Information
+## Connector Information
+
 - **Connector Name:** Cashfree Payment Gateway
 - **Base URLs:**
-  - Sandbox: `https://sandbox.cashfree.com/pg` or `https://sandbox.cashfree.com/pg/`
-  - Production: `https://cashfree.com/pg/` or `https://api.cashfree.com/pg`
-- **Additional URLs:**
-  - Webhooks: Specified by the merchant in the order creation (`notify_url`)
-  - Documentation: `https://www.cashfree.com/docs/llms.txt`
-
-### Authentication Details
-- **Authentication Methods:**
-  1. `x-client-id` + `x-client-secret`
-  2. `x-client-id` + `x-partner-apikey`
-  3. `x-client-id` + `x-client-signature`
-  4. `x-partner-merchantid` + `x-partner-apikey`
-- **Headers:**
-  - `x-api-version`: API version (e.g., `2025-01-01`)
+  - Sandbox: `https://sandbox.cashfree.com/pg`
+  - Production: `https://api.cashfree.com/pg`
+- **Subscriptions Base URLs:**
+  - Sandbox: `https://sandbox.cashfree.com/pg/subscriptions`
+  - Production: `https://api.cashfree.com/pg/subscriptions`
+- **Authentication Headers:**
   - `x-client-id`: Client app ID
   - `x-client-secret`: Client secret key
+  - `x-api-version`: API version (e.g. `2025-01-01`)
   - `Content-Type`: `application/json`
-- **Notes:**
-  - Separate credentials for each Cashfree product
-  - Never expose secret keys to client-side applications
-  - Store credentials securely
+- **Idempotency:** Forward `idempotency_key` as the `x-idempotency-key` request header on all state-changing calls.
 
-### Complete Endpoint Inventory
-#### 1. Order Pay (S2S) - `POST /orders/sessions`
-- **HTTP Method:** POST
-- **URL:** `/orders/sessions`
-- **Headers:**
-  - `x-api-version`
-  - `x-request-id` (optional)
-  - `x-idempotency-key` (optional)
-- **Request Body:**
-  - `payment_session_id`
-  - `payment_method`
-- **Response:**
-  - `payment_amount`
-  - `cf_payment_id`
-  - `payment_method`
-  - `channel`
-  - `action`
-  - `data`
-- **Notes:**
-  - Does not require credentials
-  - May be invoked directly from client-side applications
+---
 
-#### 2. Get Payment by ID - `GET /orders/{order_id}/payments/{cf_payment_id}`
-- **HTTP Method:** GET
-- **URL:** `/orders/{order_id}/payments/{cf_payment_id}`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-  - `cf_payment_id`
-- **Response:**
-  - `cf_payment_id`
-  - `order_id`
-  - `payment_status`
-  - `payment_amount`
-  - `payment_currency`
-  - `payment_time`
-  - `payment_completion_time`
-  - `payment_message`
-  - `bank_reference`
-  - `auth_id`
-  - `payment_group`
-- **Notes:**
-  - Returns payment details by ID
+## Shared — failure free-text → (PaymentFailureCode, FailureClass)
 
-#### 3. Get Payments for Order - `GET /orders/{order_id}/payments`
-- **HTTP Method:** GET
-- **URL:** `/orders/{order_id}/payments`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-- **Response:**
-  - List of payments for the order
-- **Notes:**
-  - Returns all payments for an order
+Cashfree `failure_details.failure_reason` is free text. Map on **substring match** (case-insensitive,
+first match wins). Default: `UNKNOWN` (preserve raw text in `failure_reason`).
 
-#### 4. Preauthorisation - `POST /orders/{order_id}/authorization`
-- **HTTP Method:** POST
-- **URL:** `/orders/{order_id}/authorization`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-- **Request Body:**
-  - Authorization details
-- **Response:**
-  - Authorization result
-- **Notes:**
-  - Preauthorizes a payment
+`FAILURE_CLASS` is **published data only** — lens never branches on it. The connector sets
+`MandateDebitOutcome.failure_code`; orbit reads `FAILURE_CLASS[code]`. Never redeclare `FailureClass`
+or `FAILURE_CLASS` in the generated connector.
 
-#### 5. Submit or Resend OTP - `POST /orders/pay/authenticate/{cf_payment_id}`
-- **HTTP Method:** POST
-- **URL:** `/orders/pay/authenticate/{cf_payment_id}`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `cf_payment_id`
-- **Request Body:**
-  - OTP details
-- **Response:**
-  - Authentication result
-- **Notes:**
-  - Submits or resends OTP for payment authentication
+| Signal (substring in `failure_reason`) | `PaymentFailureCode` | `FailureClass` |
+|---|---|---|
+| `insufficient funds` | `INSUFFICIENT_FUNDS` | `RETRIABLE` |
+| `network` / `timeout` | `NETWORK_ERROR` | `RETRIABLE` |
+| `psp` / `system error` | `PSP_ERROR` | `RETRIABLE` |
+| `card declined` | `CARD_DECLINED` | `TERMINAL` |
+| `invalid instrument` | `INVALID_INSTRUMENT` | `TERMINAL` |
+| `mandate revoked` | `MANDATE_REVOKED` | `TERMINAL` |
+| `mandate paused` | `MANDATE_PAUSED` | `TERMINAL` |
+| `mandate expired` | `MANDATE_EXPIRED` | `TERMINAL` |
+| `mandate not found` / `subscription not found` | `MANDATE_NOT_FOUND` | `TERMINAL` |
+| `amount exceeds cap` | `DEBIT_LIMIT_EXCEEDED` | `TERMINAL` |
+| (unmatched) | `UNKNOWN` (raw in `failure_reason`) | — |
 
-#### 6. Create Order - `POST /orders`
-- **HTTP Method:** POST
-- **URL:** `/orders`
-- **Headers:**
-  - Same as authentication headers
-- **Request Body:**
-  - `order_amount`
-  - `order_currency`
-  - `customer_details`
-- **Response:**
-  - `cf_order_id`
-  - `order_id`
-  - `entity`
-  - `order_amount`
-  - `order_currency`
-  - `order_status`
-  - `payment_session_id`
-  - `order_expiry_time`
-- **Notes:**
-  - Creates a new order
+---
 
-#### 7. Get Order - `GET /orders/{order_id}`
-- **HTTP Method:** GET
-- **URL:** `/orders/{order_id}`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-- **Response:**
-  - Order details
-- **Notes:**
-  - Returns order details by ID
+## Subscriptions — `subscription_status` → `MandateStatus`
 
-#### 8. Terminate Order - `PATCH /orders/{order_id}`
-- **HTTP Method:** PATCH
-- **URL:** `/orders/{order_id}`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-- **Request Body:**
-  - Termination details
-- **Response:**
-  - Termination result
-- **Notes:**
-  - Terminates an order
+| Cashfree `subscription_status` | `MandateStatus` |
+|---|---|
+| `INITIALIZED`, `BANK_APPROVAL_PENDING` | `PENDING_AUTHORIZATION` |
+| `ACTIVE` | `ACTIVE` |
+| `PAUSED` (merchant), `CUSTOMER_PAUSED` (customer) | `PAUSED` |
+| `ON_HOLD` | `SUSPENDED` |
+| `COMPLETED` | `COMPLETED` |
+| `CANCELLED`, `CUSTOMER_CANCELLED` | `CANCELLED` |
+| `EXPIRED` | `EXPIRED` |
+| `CARD_EXPIRED` | `SUSPENDED` (instrument dead; needs re-auth) |
+| `LINK_EXPIRED` | `FAILED` (auth link lapsed pre-approval) |
+| auth `FAILED` (on `SUBSCRIPTION_AUTH_STATUS`) | `FAILED` |
 
-#### 9. Create Refund - `POST /orders/{order_id}/refunds`
-- **HTTP Method:** POST
-- **URL:** `/orders/{order_id}/refunds`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-- **Request Body:**
-  - Refund details
-- **Response:**
-  - Refund result
-- **Notes:**
-  - Creates a new refund
+---
 
-#### 10. Get Refund - `GET /orders/{order_id}/refunds/{refund_id}`
-- **HTTP Method:** GET
-- **URL:** `/orders/{order_id}/refunds/{refund_id}`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-  - `refund_id`
-- **Response:**
-  - Refund details
-- **Notes:**
-  - Returns refund details by ID
+## Subscriptions — event → `WebhookEventType`
 
-#### 11. Get All Refunds for Order - `GET /orders/{order_id}/refunds`
-- **HTTP Method:** GET
-- **URL:** `/orders/{order_id}/refunds`
-- **Headers:**
-  - Same as authentication headers
-- **Path Parameters:**
-  - `order_id`
-- **Response:**
-  - List of refunds for the order
-- **Notes:**
-  - Returns all refunds for an order
+| Cashfree event (condition) | `WebhookEventType` | Notes |
+|---|---|---|
+| `SUBSCRIPTION_AUTH_STATUS` (authorization_status=`ACTIVE`) | `MANDATE_AUTHORIZED` | |
+| `SUBSCRIPTION_AUTH_STATUS` (`FAILED`) | `MANDATE_REJECTED` | |
+| `SUBSCRIPTION_PAYMENT_SUCCESS` | `MANDATE_DEBIT_SUCCESS` | |
+| `SUBSCRIPTION_PAYMENT_FAILED` | `MANDATE_DEBIT_FAILED` | `psp_attempt = retry_attempts` from payload |
+| `SUBSCRIPTION_PAYMENT_CANCELLED` | `MANDATE_DEBIT_FAILED` | `failure_code = USER_CANCELLED` |
+| `SUBSCRIPTION_PAYMENT_NOTIFICATION_INITIATED` | `MANDATE_DEBIT_NOTIFIED` | orbit accepted — emit |
+| `SUBSCRIPTION_STATUS_CHANGED` → `ACTIVE` (from paused) | `MANDATE_RESUMED` | |
+| `SUBSCRIPTION_STATUS_CHANGED` → `CUSTOMER_PAUSED` | `MANDATE_PAUSED` | |
+| `SUBSCRIPTION_STATUS_CHANGED` → `ON_HOLD` | `MANDATE_SUSPENDED` | |
+| `SUBSCRIPTION_STATUS_CHANGED` → `CANCELLED` | `MANDATE_CANCELLED` | |
+| `SUBSCRIPTION_STATUS_CHANGED` → `CUSTOMER_CANCELLED` | `MANDATE_REVOKED` | |
+| `SUBSCRIPTION_STATUS_CHANGED` → `EXPIRED` / `CARD_EXPIRED` | `MANDATE_EXPIRED` | |
+| `SUBSCRIPTION_STATUS_CHANGED` → `COMPLETED` | `MANDATE_COMPLETED` | |
+| `SUBSCRIPTION_CARD_EXPIRY_REMINDER` | `MANDATE_EXPIRING_SOON` | orbit accepted — emit |
+| `SUBSCRIPTION_REFUND_STATUS` | reuse refund handling | out of core mandate scope |
 
-### Flow Categories
-- **Payment/Authorization flows:**
-  - Order Pay (S2S)
-  - Get Payment by ID
-  - Preauthorisation
-  - Submit or Resend OTP
-- **Capture operations:**
-  - Not explicitly mentioned
-- **Refund processes:**
-  - Create Refund
-  - Get Refund
-  - Get All Refunds for Order
-- **Status/sync endpoints:**
-  - Get Payment by ID
-  - Get Payments for Order
-  - Get Order
-- **Dispute handling:**
-  - Not explicitly mentioned
-- **Tokenization/vaulting:**
-  - Not explicitly mentioned
-- **Webhook endpoints:**
-  - Payment webhooks (e.g., `PAYMENT_SUCCESS_WEBHOOK`)
-- **Account/configuration endpoints:**
-  - Create Order
-  - Get Order
-  - Terminate Order
+> **No `*_FAILED_FINAL` event.** There is no Cashfree "retries-exhausted / final-failure" event.
+> Finality is derived by the consumer from `MANDATE_SUSPENDED` (← `ON_HOLD`) + `psp_attempt`.
+> Do **not** synthesize a `*_FAILED_FINAL` event.
+>
+> `ON_HOLD` is **payment-failure-only** (merchant/customer pauses are `PAUSED`/`CUSTOMER_PAUSED`),
+> so `MANDATE_SUSPENDED` unambiguously means a payment-failure suspension — no reason field exists
+> or is needed. Documented for NACH + Card SI; **normalize UPI_AUTOPAY debit failure to
+> `MANDATE_SUSPENDED` too** (confirm the exact UPI path in sandbox — open L9 item).
 
-### Configuration Parameters
-- **Environment variables:**
-  - `x-api-version`
-  - `x-client-id`
-  - `x-client-secret`
-- **Settings:**
-  - API version
-  - Client ID
-  - Client secret
-- **Supported features:**
-  - Payments
-  - Refunds
-  - Orders
-- **Currencies:**
-  - INR (Indian Rupee)
-- **Regions:**
-  - India
-- **Integration requirements:**
-  - API keys
-  - Client ID
-  - Client secret
+---
+
+## Subscriptions — rail → `payment_methods`
+
+| `MandateRail` | Cashfree `authorization_details.payment_methods` |
+|---|---|
+| `UPI_AUTOPAY` | `[upi]` |
+| `CARD_EMANDATE` | `[card]` |
+
+eNACH/pNACH bank rails are out of scope this phase.
+
+---
+
+## Subscriptions — create-request field map
+
+Maps `CreateSubscriptionRequest` lens fields to Cashfree Subscriptions API fields.
+
+| lens field | Cashfree field | Notes |
+|---|---|---|
+| `amount` (`Amount`) | `plan_details.plan_recurring_amount` | |
+| `max_amount` (`Amount`) | `plan_details.plan_max_amount` | |
+| `interval_type` | `plan_interval_type` | |
+| `interval_count` | `plan_intervals` | |
+| `max_cycles` | `plan_max_cycles` | |
+| `first_charge_at` | `subscription_first_charge_time` | PERIODIC mode only |
+| `expires_at` | `subscription_expiry_time` | |
+| `customer_contact.email` | `customer_details.customer_email` | required |
+| `customer_contact.phone` | `customer_details.customer_phone` | required |
+| `return_url` | `subscription_meta.return_url` | |
+| (notification) | `subscription_meta.notification_channel = [SMS, EMAIL]` | always set both |
+| `rail` | `authorization_details.payment_methods` | via rail → payment_methods table above |
+| `idempotency_key` | Cashfree idempotency token header (`x-idempotency-key`) | |
+| `ManageMandateRequest.effective_at` (resume) | `action_details.next_scheduled_time` | resume = ACTIVATE verb |
