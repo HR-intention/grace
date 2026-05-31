@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,185 @@ REQUIRED_PROPERTIES = {
     "supported_methods",
     "supports_idempotency_key",
 }
+
+
+# ---------------------------------------------------------------------------
+# Capability-interface names that form the "known" leaf set for BFS.
+# ---------------------------------------------------------------------------
+_CAPABILITY_INTERFACES: frozenset[str] = frozenset(
+    {"PaymentsConnector", "MandateConnector"}
+)
+
+
+@dataclass(frozen=True)
+class RegisteredClass:
+    """Static-analysis result for a package's registered connector class.
+
+    Attributes:
+        name: The class name captured from the second positional arg of
+            ``ConnectorFactory.register("<psp>", X)`` in ``__init__.py``.
+        capability_bases: The subset of the transitive base-name closure that
+            are known capability interfaces (``PaymentsConnector``,
+            ``MandateConnector``).  Always a ``frozenset``; the tests coerce
+            it with ``set()``.
+    """
+
+    name: str
+    capability_bases: frozenset[str]
+
+
+def _extract_register_class_name(init_text: str) -> str | None:
+    """Return the second positional arg name from the first
+    ``ConnectorFactory.register(...)`` call, or ``None`` if not found.
+
+    Accepts either AST (preferred) or falls back to a simple regex so that
+    non-parseable ``__init__.py`` files don't hard-crash the rubric.
+    """
+    # Try AST first — most reliable.
+    try:
+        tree = ast.parse(init_text)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Expr):
+                continue
+            call = node.value
+            if not isinstance(call, ast.Call):
+                continue
+            # Match ConnectorFactory.register(...)
+            func = call.func
+            is_register = (
+                isinstance(func, ast.Attribute)
+                and func.attr == "register"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "ConnectorFactory"
+            )
+            if not is_register:
+                continue
+            # Second positional arg (index 1) is the class name.
+            if len(call.args) >= 2:
+                arg = call.args[1]
+                if isinstance(arg, ast.Name):
+                    return arg.id
+    except SyntaxError:
+        pass
+
+    # Regex fallback: ConnectorFactory.register("<psp>", ClassName)
+    m = re.search(
+        r"""ConnectorFactory\.register\(\s*["'][^"']*["']\s*,\s*([A-Za-z_]\w*)""",
+        init_text,
+    )
+    return m.group(1) if m else None
+
+
+def _build_class_bases_map(pkg: Path) -> dict[str, list[str]]:
+    """AST-parse every ``*.py`` under *pkg* and return a mapping
+    ``{class_name: [direct_base_name, ...]}``.
+
+    Base names are extracted as:
+    - ``ast.Name.id`` for simple names (``Connector``, ``_DemoBase``).
+    - ``ast.Attribute.attr`` for dotted names (``lens.connector.Connector``
+      → ``"Connector"``).
+
+    Classes with the same name in different modules are merged (last-wins for
+    the base list, but for BFS purposes any occurrence is sufficient — we only
+    care about reachability, not which file defined a class).
+    """
+    result: dict[str, list[str]] = {}
+    for py_file in pkg.rglob("*.py"):
+        try:
+            text = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases: list[str] = []
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    bases.append(base.id)
+                elif isinstance(base, ast.Attribute):
+                    bases.append(base.attr)
+            result[node.name] = bases
+    return result
+
+
+def _transitive_bases(start: str, bases_map: dict[str, list[str]]) -> set[str]:
+    """BFS from *start* through *bases_map* and return the full set of
+    reachable names (excluding *start* itself).
+
+    Names not in *bases_map* are leaves — they are still included in the
+    result so that ``PaymentsConnector`` / ``MandateConnector`` (which are
+    external to the fixture package and thus won't appear as ``ClassDef``
+    nodes) are present when the BFS reaches them.
+    """
+    visited: set[str] = set()
+    queue: deque[str] = deque(bases_map.get(start, []))
+    while queue:
+        name = queue.popleft()
+        if name in visited:
+            continue
+        visited.add(name)
+        for parent in bases_map.get(name, []):
+            if parent not in visited:
+                queue.append(parent)
+    return visited
+
+
+def resolve_registered_class(pkg: Path) -> RegisteredClass:
+    """Resolve the class registered via ``ConnectorFactory.register`` in
+    *pkg*'s ``__init__.py`` and compute its transitive capability bases.
+
+    Algorithm (Design §OQ-A):
+    1. Parse ``__init__.py``; capture second positional arg of
+       ``ConnectorFactory.register("<psp>", X)`` → class name *X*.
+    2. AST-parse every ``*.py`` under *pkg*; build ``{class_name: [bases]}``.
+    3. BFS from *X* through the map to collect the transitive base-name set.
+    4. ``capability_bases = transitive_names ∩ _CAPABILITY_INTERFACES``.
+
+    Raises:
+        ValueError: if ``__init__.py`` is missing or has no register call.
+    """
+    init_py = pkg / "__init__.py"
+    if not init_py.is_file():
+        raise ValueError(f"{pkg}: missing __init__.py")
+
+    init_text = init_py.read_text(encoding="utf-8", errors="replace")
+    class_name = _extract_register_class_name(init_text)
+    if class_name is None:
+        raise ValueError(
+            f"{pkg}: no ConnectorFactory.register call with a class-name arg found"
+        )
+
+    bases_map = _build_class_bases_map(pkg)
+    transitive = _transitive_bases(class_name, bases_map)
+    cap_bases = frozenset(transitive & _CAPABILITY_INTERFACES)
+
+    return RegisteredClass(name=class_name, capability_bases=cap_bases)
+
+
+def composition_findings(pkg: Path) -> list[str]:
+    """Return a list of human-readable findings about the registered class's
+    capability composition, or an empty list if everything is fine.
+
+    Rules checked here (T12 scope only):
+    - The package must have a resolvable register call.
+    - The registered class must transitively inherit at least one of
+      ``PaymentsConnector`` or ``MandateConnector``.
+
+    Returns:
+        An empty list when compliant; a non-empty list of finding strings
+        (each containing "capability interface") otherwise.
+    """
+    try:
+        result = resolve_registered_class(pkg)
+    except ValueError as exc:
+        return [f"cannot resolve registered class: {exc}; must implement a capability interface"]
+    if not result.capability_bases:
+        return [
+            f"registered class {result.name!r} does not implement a capability interface "
+            f"(must inherit PaymentsConnector and/or MandateConnector, not bare Connector)"
+        ]
+    return []
 
 
 def _score_marker(output_dir: Path) -> Dimension:
