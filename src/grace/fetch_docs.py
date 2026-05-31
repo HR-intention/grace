@@ -103,6 +103,45 @@ DEFAULT_EXCLUDE_GLOBS: tuple[str, ...] = (
 )
 
 
+# Pages every domain's connector needs (auth, identity, error shapes, webhook signing).
+SHARED_INCLUDE_GLOBS: tuple[str, ...] = (
+    "*api*authentication*", "*api*overview*", "*api*enums*", "*api*errors*",
+    "*webhooks*signature*", "*webhooks*security*",
+)
+DOMAIN_INCLUDE_GLOBS: dict[str, tuple[str, ...]] = {
+    "orders": ("*api*orders*", "*api*payments*", "*api*refunds*", "*payments*webhook*"),
+    "subscriptions": (
+        "*subscription/*", "*subscription/plans*", "*subscription/mandate*",
+        "*subscription/payment*", "*subscription*webhook*",
+    ),
+}
+# subscriptionsv1 (legacy, body-embedded sig) is never wanted.
+LEGACY_EXCLUDE_GLOBS: tuple[str, ...] = ("*subscriptionsv1*", "*previous/*", "*v2022-*", "*v2023-*", "*v2024-*")
+
+
+def _domain_includes(domain: str) -> tuple[str, ...]:
+    if domain == "all":
+        merged = set(SHARED_INCLUDE_GLOBS)
+        for globs in DOMAIN_INCLUDE_GLOBS.values():
+            merged.update(globs)
+        return tuple(sorted(merged))
+    if domain not in DOMAIN_INCLUDE_GLOBS:
+        raise GraceError(reason=GraceErrorReason.SOURCE_FETCH_FAILED, detail=f"unknown domain {domain!r}")
+    return SHARED_INCLUDE_GLOBS + DOMAIN_INCLUDE_GLOBS[domain]
+
+
+def filter_urls_by_domain(urls: list[str], *, domain: str) -> list[str]:
+    return filter_urls(urls, include=list(_domain_includes(domain)), exclude=list(LEGACY_EXCLUDE_GLOBS))
+
+
+def bucket_for_url(url: str) -> str:
+    path = _path_of(url)
+    for dom, globs in DOMAIN_INCLUDE_GLOBS.items():
+        if any(fnmatch.fnmatch(path, g) for g in globs):
+            return dom
+    return "_shared"
+
+
 @dataclass(frozen=True)
 class FetchDocsResult:
     psp_name: str
