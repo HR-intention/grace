@@ -16,32 +16,40 @@ The most common failure is `CLAUDE_CODE_NOT_AUTHENTICATED` — fix with `claude 
 
 ## `grace fetch-docs`
 
-Pulls the v1-relevant markdown pages out of a PSP's `llms.txt` and writes them to `<cwd>/connector_docs/<psp>/`.
+Pulls the relevant markdown pages out of a PSP's `llms.txt`, groups them by
+domain, and writes them to `<cwd>/connector_docs/<psp>/{_shared,orders,subscriptions}/`.
+Also scaffolds a developer-editable `connector_docs/<psp>.md` spec.
 
 ```bash
-uv run grace fetch-docs <psp> --from <llms.txt-url-or-path>
+uv run grace fetch-docs <psp> --from <llms.txt-url-or-path> --domain all
 ```
 
 Options that matter:
 
 | Flag | Default | When to set |
 |---|---|---|
-| `--include "<glob>"` | Tuned defaults (orders, payments, refunds, webhooks, auth, overview, enums, errors) | The PSP uses a non-standard path layout. Repeat for OR. |
-| `--exclude "<glob>"` | Drops `previous/*`, S2S flows, subscriptions, payouts, etc. | The PSP has a doc section that survives the include glob but you want it out. Repeat for OR. |
+| `--domain orders\|subscriptions\|all` | `all` | Fetch only the pages relevant to a single capability domain. |
+| `--include "<glob>"` | Tuned defaults per domain (payments, webhooks, auth, overview, subscriptions, mandates, etc.) | The PSP uses a non-standard path layout. Repeat for OR. |
+| `--exclude "<glob>"` | Drops `previous/*`, S2S flows, payouts, etc. | The PSP has a doc section that survives the include glob but you want it out. Repeat for OR. |
 | `--output <dir>` | `<cwd>/connector_docs/<psp>/` | Almost never. |
+
+After fetching, **edit `connector_docs/<psp>.md`** to fill in the PSP-specific
+normalization decisions (status mapping, failure codes, webhook discriminator
+logic). Grace's `generate` step reads this spec.
 
 ## `grace generate`
 
-The full pipeline: assemble context → spawn `claude -p` (output streams live) → post-process markers → run quality gates → emit `quality_report.json` → refresh `docs-generated/`.
+The full pipeline: assemble domain-scoped context → spawn `claude -p` (output streams live) → post-process markers → run quality gates → emit `quality_report.json` → refresh `docs-generated/`.
 
 ```bash
-uv run grace generate <psp>
+uv run grace generate <psp> --domain all
 ```
 
 Options that matter:
 
 | Flag | Default | When to set |
 |---|---|---|
+| `--domain orders\|subscriptions\|all` | `all` | Target a single capability domain. `--domain subscriptions` rewrites only `subscriptions/*` + the compose surface (`connector.py`, `webhooks.py`, `__init__.py`); `core/` and other domains are untouched. |
 | `--from <src>` | `<cwd>/connector_docs/<psp>/` (output of `fetch-docs`) | You want to use a different docs snapshot (e.g. an older one for diffing). |
 | `--output <dir>` | `<cwd>/lens/connectors/<psp>/` | Almost never. |
 | `--config <path>` | `~/.grace/config.yaml` | Tests / experiments. |
@@ -81,7 +89,7 @@ quality:
   min_rubric_score: 60
 
 lens:
-  version_constraint: "^0.1"  # written into the generated __init__.py
+  version_constraint: "^0.2"  # written into the generated __init__.py as requires_lens
 ```
 
 CLI flags override config. **No API keys live here.**
