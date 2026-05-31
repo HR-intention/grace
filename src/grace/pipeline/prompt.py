@@ -326,44 +326,89 @@ _CORE_CREATION_NOTICE = """\
     for the requested domain listed in "Target package layout" above."""
 
 # ---------------------------------------------------------------------------
-# Locked surface block
+# Locked surface — domain-conditional fragments
 # ---------------------------------------------------------------------------
 
-_LOCKED_SURFACE = """\
-╔══════════════════════════════════════════════════════════════════════╗
-║ LOCKED SURFACE — DO NOT DEVIATE                                       ║
-╚══════════════════════════════════════════════════════════════════════╝
+_LOCKED_HIERARCHY_ORDERS = """\
+   ✓ _<Psp>Base(Connector)            — in core/base.py
+   ✓ <Psp>Orders(_<Psp>Base, PaymentsConnector)     — in orders/connector.py
+   ✗ Never subclass bare Connector for a domain mixin — only _<Psp>Base does that."""
 
-These are the most common ways a generation can go wrong. Read them BEFORE
-reading the rulebook, then re-check against this list before you finish.
+_LOCKED_HIERARCHY_SUBSCRIPTIONS = """\
+   ✓ _<Psp>Base(Connector)            — in core/base.py
+   ✓ <Psp>Subscriptions(_<Psp>Base, MandateConnector) — in subscriptions/connector.py
+   ✗ Never subclass bare Connector for a domain mixin — only _<Psp>Base does that.
+   ✗ MandatesConnector does not exist — the import is `MandateConnector` (singular)."""
 
-1. CLASS NAMES AND HIERARCHY:
+_LOCKED_HIERARCHY_ALL = """\
    ✓ _<Psp>Base(Connector)            — in core/base.py
    ✓ <Psp>Orders(_<Psp>Base, PaymentsConnector)     — in orders/connector.py
    ✓ <Psp>Subscriptions(_<Psp>Base, MandateConnector) — in subscriptions/connector.py
    ✗ Never subclass bare Connector for a domain mixin — only _<Psp>Base does that.
-   ✗ MandatesConnector does not exist — the import is `MandateConnector` (singular).
+   ✗ MandatesConnector does not exist — the import is `MandateConnector` (singular)."""
 
-2. IMPORTS come from these exact module paths:
-{imports_block}
-     from lens.connector import Connector
-     from lens.webhook import WebhookHandlers, WebhookFamily
-     from lens.factory import ConnectorFactory, ConnectorConfig
-     from lens.common import Maskable, ConnectorError, ConnectorErrorReason
-   ✗ Do NOT import from `lens.connector_abc`, `lens.types`, `lens.models`, etc.
-   ✗ Do NOT import a `Money` type — the locked money type is `Amount`.
-
+_LOCKED_ASYNC_FLOW_ORDERS = """\
 3. EVERY FLOW METHOD IS `async def`. Use the shared `self._client` (httpx.AsyncClient).
    ✓ `async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse:`
    ✗ `def create_order(self, request): ...`
-   ✗ Never instantiate a new httpx.AsyncClient inside a flow method or domain mixin.
+   ✗ Never instantiate a new httpx.AsyncClient inside a flow method or domain mixin."""
 
+_LOCKED_ASYNC_FLOW_SUBSCRIPTIONS = """\
+3. EVERY FLOW METHOD IS `async def`. Use the shared `self._client` (httpx.AsyncClient).
+   ✓ `async def create_subscription(self, request: CreateSubscriptionRequest) -> CreateSubscriptionResponse:`
+   ✗ `def create_subscription(self, request): ...`
+   ✗ Never instantiate a new httpx.AsyncClient inside a flow method or domain mixin."""
+
+_LOCKED_ASYNC_FLOW_ALL = """\
+3. EVERY FLOW METHOD IS `async def`. Use the shared `self._client` (httpx.AsyncClient).
+   ✓ `async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse:`
+   ✓ `async def create_subscription(self, request: CreateSubscriptionRequest) -> CreateSubscriptionResponse:`
+   ✗ `def create_order(self, request): ...`
+   ✗ Never instantiate a new httpx.AsyncClient inside a flow method or domain mixin."""
+
+_LOCKED_INTROSPECTION_MANDATE = """\
 4. INTROSPECTION METHODS on MandateConnector are PLAIN `def`, NOT `@property`, NOT `async def`:
    ✓ `def supported_mandate_rails(self) -> set[MandateRail]:`
    ✗ `@property` on introspection methods — the ABC does not stack @abstractmethod + @property.
    The four introspection methods are: supported_mandate_rails, supports_pause,
-   supported_intervals, max_mandate_amount(rail: MandateRail).
+   supported_intervals, max_mandate_amount(rail: MandateRail)."""
 
+_LOCKED_INTROSPECTION_PAYMENTS = """\
+4. INTROSPECTION PROPERTIES on PaymentsConnector are `@property`:
+   ✓ `@property` followed by `def supported_methods(self) -> set[PaymentMethod]:`
+   ✓ `@property` followed by `def supports_idempotency_key(self) -> bool:`"""
+
+_LOCKED_DOMAIN_TYPES_ORDERS = """\
+5. DOMAIN TYPES use the exact field names from domain_types.md:
+   - `request.amount.minor_units: int`             (NOT `.value`, NOT `.amount`)
+   - `request.amount.currency: Currency`
+   - `request.customer_id: str | None`
+   - `request.idempotency_key: str | None`
+   - `request.merchant_id: str`
+   - `request.return_url: HttpUrl`                 (required for create_order)
+   - `request.order_id: str`
+
+   Response fields are locked (no invented extras):
+   - CreateOrderResponse:     psp_order_id, payment_link, status, expires_at
+   - SyncPaymentResponse:     psp_order_id, status, paid_amount (int), attempts
+   - RefundResponse:          psp_refund_id, status, refunded_amount (int)
+   - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int), failure_reason
+   - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount), failure_code,
+                              failure_reason, attempted_at (required, non-optional), raw"""
+
+_LOCKED_DOMAIN_TYPES_SUBSCRIPTIONS = """\
+5. DOMAIN TYPES use the exact field names from domain_types.md:
+   - `request.amount.minor_units: int`             (NOT `.value`, NOT `.amount`)
+   - `request.amount.currency: Currency`
+   - `request.customer_id: str | None`
+   - `request.merchant_id: str`
+
+   Response fields are locked (no invented extras):
+   - CreateSubscriptionResponse: psp_subscription_id, psp_mandate_id, status, payment_link
+   - SyncSubscriptionResponse:   psp_subscription_id, psp_mandate_id, status, mandate_status,
+                                 next_debit_at"""
+
+_LOCKED_DOMAIN_TYPES_ALL = """\
 5. DOMAIN TYPES use the exact field names from domain_types.md:
    - `request.amount.minor_units: int`             (NOT `.value`, NOT `.amount`)
    - `request.amount.currency: Currency`
@@ -382,7 +427,72 @@ reading the rulebook, then re-check against this list before you finish.
                               failure_reason, attempted_at (required, non-optional), raw
    - CreateSubscriptionResponse: psp_subscription_id, psp_mandate_id, status, payment_link
    - SyncSubscriptionResponse:   psp_subscription_id, psp_mandate_id, status, mandate_status,
-                                 next_debit_at
+                                 next_debit_at"""
+
+
+def _locked_hierarchy_for_domain(domain: str) -> str:
+    if domain == "orders":
+        return _LOCKED_HIERARCHY_ORDERS
+    if domain == "subscriptions":
+        return _LOCKED_HIERARCHY_SUBSCRIPTIONS
+    return _LOCKED_HIERARCHY_ALL
+
+
+def _locked_async_flow_for_domain(domain: str) -> str:
+    if domain == "orders":
+        return _LOCKED_ASYNC_FLOW_ORDERS
+    if domain == "subscriptions":
+        return _LOCKED_ASYNC_FLOW_SUBSCRIPTIONS
+    return _LOCKED_ASYNC_FLOW_ALL
+
+
+def _locked_introspection_for_domain(domain: str) -> str:
+    if domain == "subscriptions":
+        return _LOCKED_INTROSPECTION_MANDATE
+    if domain == "orders":
+        return _LOCKED_INTROSPECTION_PAYMENTS
+    # "all" — include both
+    return _LOCKED_INTROSPECTION_PAYMENTS + "\n\n" + _LOCKED_INTROSPECTION_MANDATE
+
+
+def _locked_domain_types_for_domain(domain: str) -> str:
+    if domain == "orders":
+        return _LOCKED_DOMAIN_TYPES_ORDERS
+    if domain == "subscriptions":
+        return _LOCKED_DOMAIN_TYPES_SUBSCRIPTIONS
+    return _LOCKED_DOMAIN_TYPES_ALL
+
+
+# ---------------------------------------------------------------------------
+# Locked surface block (uses {hierarchy_block}, {introspection_block},
+# {imports_block}, {domain_types_block} substitutions)
+# ---------------------------------------------------------------------------
+
+_LOCKED_SURFACE = """\
+╔══════════════════════════════════════════════════════════════════════╗
+║ LOCKED SURFACE — DO NOT DEVIATE                                       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+These are the most common ways a generation can go wrong. Read them BEFORE
+reading the rulebook, then re-check against this list before you finish.
+
+1. CLASS NAMES AND HIERARCHY:
+{hierarchy_block}
+
+2. IMPORTS come from these exact module paths:
+{imports_block}
+     from lens.connector import Connector
+     from lens.webhook import WebhookHandlers, WebhookFamily
+     from lens.factory import ConnectorFactory, ConnectorConfig
+     from lens.common import Maskable, ConnectorError, ConnectorErrorReason
+   ✗ Do NOT import from `lens.connector_abc`, `lens.types`, `lens.models`, etc.
+   ✗ Do NOT import a `Money` type — the locked money type is `Amount`.
+
+{async_flow_block}
+
+{introspection_block}
+
+{domain_types_block}
 
 6. WEBHOOK SIGNATURE FAILURE raises a typed error:
      raise ConnectorError(reason=ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED)
@@ -559,8 +669,13 @@ def build_prompt(ctx: GenerationContext) -> str:
     else:
         source_block = "\n".join(f"  - {p}" for p in ctx.psp_docs.local_paths)
 
-    locked_surface = _LOCKED_SURFACE.replace(
-        "{imports_block}", _imports_for_domain(domain) + "\n"
+    locked_surface = (
+        _LOCKED_SURFACE
+        .replace("{hierarchy_block}", _locked_hierarchy_for_domain(domain))
+        .replace("{imports_block}", _imports_for_domain(domain) + "\n")
+        .replace("{async_flow_block}", _locked_async_flow_for_domain(domain))
+        .replace("{introspection_block}", _locked_introspection_for_domain(domain))
+        .replace("{domain_types_block}", _locked_domain_types_for_domain(domain))
     )
 
     return PROMPT_TEMPLATE.format(
