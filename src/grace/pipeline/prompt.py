@@ -245,6 +245,18 @@ _SELF_CHECK_ORDERS = """\
     Grep(pattern="SyncPaymentResponse\\(.*paid_amount=Amount", path=<cwd>, glob="*.py")
         → ZERO matches  (paid_amount is int minor units, never Amount)
 
+  ORDERS REFUND / SYNC-REFUND FIELD GUARDRAILS:
+    Grep(pattern="RefundRequest|SyncRefundRequest", path=<cwd>/orders, glob="connector.py")
+        → present (both types used in flow methods)
+    Grep(pattern="request\\.psp_order_id", path=<cwd>/orders, glob="connector.py")
+        → ZERO matches  (RefundRequest/SyncRefundRequest have NO psp_order_id;
+                         only SyncPaymentRequest has psp_order_id — use request.order_id
+                         in any refund or sync_refund URL path)
+    Grep(pattern="refunded_amount=Amount\\|paid_amount=Amount", path=<cwd>, glob="*.py")
+        → ZERO matches  (refunded_amount + paid_amount are int minor-units, never Amount)
+    Grep(pattern="request\\.order_id", path=<cwd>/orders, glob="connector.py")
+        → present in refund / sync_refund flows
+
   ORDERS TESTS:
     Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests/integration/connectors, glob="*.py", output_mode="content")
         → every match line must end with ") -> None:"
@@ -388,13 +400,41 @@ _LOCKED_DOMAIN_TYPES_ORDERS = """\
    - `request.return_url: HttpUrl`                 (required for create_order)
    - `request.order_id: str`
 
+5a. LOCKED REQUEST FIELDS — per type (extra="forbid" means wrong kwargs → ValidationError):
+
+   CreateOrderRequest:     merchant_id, order_id, customer_id, idempotency_key,
+                           amount, return_url, allowed_methods, expires_at, metadata
+   SyncPaymentRequest:     merchant_id, order_id, customer_id, idempotency_key,
+                           psp_order_id   ← ONLY THIS TYPE has psp_order_id
+   RefundRequest:          merchant_id, order_id, customer_id, idempotency_key,
+                           psp_payment_id, refund_id, amount_to_refund, reason
+                           ✗ NO psp_order_id on RefundRequest — use request.order_id
+                           ✗ The amount field is amount_to_refund (int|None), NOT amount
+   SyncRefundRequest:      merchant_id, order_id, customer_id, idempotency_key,
+                           psp_refund_id
+                           ✗ NO psp_order_id on SyncRefundRequest — use request.order_id
+                           ✗ NO refund_id on SyncRefundRequest
+
+   CRITICAL — REFUND URL RULE:
+   PSPs that scope refund endpoints to an order (e.g. POST /orders/{id}/refunds,
+   GET /orders/{id}/refunds/{refund_id}) must use `request.order_id` (the merchant
+   order id Orbit stored at create-order time). `request.psp_order_id` does NOT exist
+   on RefundRequest or SyncRefundRequest → accessing it causes AttributeError at runtime.
+   ✓ Use `request.order_id` in refund + sync_refund URL paths.
+   ✗ NEVER use `request.psp_order_id` in refund or sync_refund flows.
+
    Response fields are locked (no invented extras):
    - CreateOrderResponse:     psp_order_id, payment_link, status, expires_at
-   - SyncPaymentResponse:     psp_order_id, status, paid_amount (int), attempts
-   - RefundResponse:          psp_refund_id, status, refunded_amount (int)
-   - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int), failure_reason
-   - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount), failure_code,
+   - SyncPaymentResponse:     psp_order_id, status, paid_amount (int minor-units), attempts
+   - RefundResponse:          psp_refund_id, status, refunded_amount (int minor-units)
+   - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int minor-units), failure_reason
+   - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount|None), failure_code,
                               failure_reason, attempted_at (required, non-optional), raw
+
+   LOCKED int-minor-units rule — these response fields are plain `int`, NOT `Amount`:
+   ✗ `paid_amount=Amount(...)` — SyncPaymentResponse.paid_amount is int minor-units
+   ✗ `refunded_amount=Amount(...)` — RefundResponse/SyncRefundResponse.refunded_amount is int
+   ✓ `paid_amount=int_value`, `refunded_amount=int_value`
 
    LOCKED PaymentMethod MEMBERS — EXACT SET (do NOT invent others):
      PaymentMethod.CARD, PaymentMethod.UPI, PaymentMethod.WALLET,
@@ -445,15 +485,43 @@ _LOCKED_DOMAIN_TYPES_ALL = """\
    - `request.return_url: HttpUrl`                 (required for create_order)
    - `request.order_id: str`
 
+5a. LOCKED REQUEST FIELDS — per type (extra="forbid" means wrong kwargs → ValidationError):
+
+   CreateOrderRequest:     merchant_id, order_id, customer_id, idempotency_key,
+                           amount, return_url, allowed_methods, expires_at, metadata
+   SyncPaymentRequest:     merchant_id, order_id, customer_id, idempotency_key,
+                           psp_order_id   ← ONLY THIS TYPE has psp_order_id
+   RefundRequest:          merchant_id, order_id, customer_id, idempotency_key,
+                           psp_payment_id, refund_id, amount_to_refund, reason
+                           ✗ NO psp_order_id on RefundRequest — use request.order_id
+                           ✗ The amount field is amount_to_refund (int|None), NOT amount
+   SyncRefundRequest:      merchant_id, order_id, customer_id, idempotency_key,
+                           psp_refund_id
+                           ✗ NO psp_order_id on SyncRefundRequest — use request.order_id
+                           ✗ NO refund_id on SyncRefundRequest
+
+   CRITICAL — REFUND URL RULE:
+   PSPs that scope refund endpoints to an order (e.g. POST /orders/{id}/refunds,
+   GET /orders/{id}/refunds/{refund_id}) must use `request.order_id` (the merchant
+   order id Orbit stored at create-order time). `request.psp_order_id` does NOT exist
+   on RefundRequest or SyncRefundRequest → accessing it causes AttributeError at runtime.
+   ✓ Use `request.order_id` in refund + sync_refund URL paths.
+   ✗ NEVER use `request.psp_order_id` in refund or sync_refund flows.
+
    Response fields are locked (no invented extras):
    - CreateOrderResponse:     psp_order_id, payment_link, status, expires_at
-   - SyncPaymentResponse:     psp_order_id, status, paid_amount (int), attempts
-   - RefundResponse:          psp_refund_id, status, refunded_amount (int)
-   - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int), failure_reason
-   - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount), failure_code,
+   - SyncPaymentResponse:     psp_order_id, status, paid_amount (int minor-units), attempts
+   - RefundResponse:          psp_refund_id, status, refunded_amount (int minor-units)
+   - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int minor-units), failure_reason
+   - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount|None), failure_code,
                               failure_reason, attempted_at (required, non-optional), raw
    - CreateSubscriptionResponse: psp_mandate_ref, status, approval, raw
    - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw
+
+   LOCKED int-minor-units rule — these response fields are plain `int`, NOT `Amount`:
+   ✗ `paid_amount=Amount(...)` — SyncPaymentResponse.paid_amount is int minor-units
+   ✗ `refunded_amount=Amount(...)` — RefundResponse/SyncRefundResponse.refunded_amount is int
+   ✓ `paid_amount=int_value`, `refunded_amount=int_value`
 
    LOCKED PaymentMethod MEMBERS — EXACT SET (do NOT invent others):
      PaymentMethod.CARD, PaymentMethod.UPI, PaymentMethod.WALLET,

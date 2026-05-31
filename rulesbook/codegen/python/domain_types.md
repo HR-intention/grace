@@ -22,9 +22,41 @@ from lens.domain_types import (
 )
 ```
 
-All payment request/response models are unchanged from lens 0.1. See the field reference
-in `pitfalls.md` §4a for the exact kwargs — they have `extra="forbid"` and incorrect
-kwargs raise a `ValidationError` at runtime.
+All payment request/response models have `extra="forbid"` — incorrect kwargs raise a
+`ValidationError` at runtime. **Exact field inventory** (do not guess; wrong names cause
+`AttributeError` on access or `ValidationError` on construction):
+
+```
+CreateOrderRequest:  merchant_id, order_id, customer_id, idempotency_key,
+                     amount, return_url, allowed_methods, expires_at, metadata
+
+SyncPaymentRequest:  merchant_id, order_id, customer_id, idempotency_key,
+                     psp_order_id        ← ONLY THIS TYPE carries psp_order_id
+
+RefundRequest:       merchant_id, order_id, customer_id, idempotency_key,
+                     psp_payment_id, refund_id, amount_to_refund, reason
+                     • amount_to_refund: int | None  (None = full refund)
+                     • NO psp_order_id — use request.order_id for order-scoped PSP URLs
+
+SyncRefundRequest:   merchant_id, order_id, customer_id, idempotency_key,
+                     psp_refund_id
+                     • NO psp_order_id — use request.order_id for order-scoped PSP URLs
+                     • NO refund_id
+```
+
+**Response fields** (locked — no invented extras):
+
+```
+CreateOrderResponse:   psp_order_id, payment_link, status, expires_at
+SyncPaymentResponse:   psp_order_id, status, paid_amount (int minor-units), attempts
+RefundResponse:        psp_refund_id, status, refunded_amount (int minor-units)
+SyncRefundResponse:    psp_refund_id, status, refunded_amount (int minor-units), failure_reason
+PaymentAttempt:        psp_payment_id, status, method_used, amount (Amount|None),
+                       failure_code, failure_reason, attempted_at (required), raw
+```
+
+`paid_amount` and `refunded_amount` are **`int` minor-units** (e.g. paise), never `Amount`.
+`PaymentAttempt.amount` is `Amount | None` — the only `Amount` on the response side.
 
 ### `PaymentWebhookEvent` — exact fields (no more, no less)
 

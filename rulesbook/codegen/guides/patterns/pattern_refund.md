@@ -10,10 +10,17 @@ The `refund` flow initiates a reversal against the successful `PaymentAttempt` o
 Highlights:
 
 - `request.psp_payment_id: str` — the successful attempt's PSP id.
+- `request.order_id: str` — **use this for order-scoped PSP refund URLs** (see note below).
 - `request.refund_id: str` — Orbit's refund id; pass through as the PSP's reference.
 - `request.amount_to_refund: int | None` — `None` means full refund.
 - `request.idempotency_key: str | None` — pass through as a header when present.
 - Response carries `psp_refund_id`, `status: RefundStatus`, optional `refunded_amount: int`.
+
+> **`request.psp_order_id` does NOT exist on `RefundRequest`.**
+> PSPs that scope refund endpoints to an order (e.g. `POST /orders/{id}/refunds`) must
+> use **`request.order_id`** — the merchant order id Orbit stored at create-order time.
+> Only `SyncPaymentRequest` has `psp_order_id`. Accessing `request.psp_order_id` on a
+> `RefundRequest` raises `AttributeError` at runtime.
 
 ## Method signature (in `connector.py`)
 

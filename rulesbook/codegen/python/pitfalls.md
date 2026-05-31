@@ -86,6 +86,46 @@ are **plain `def`** — they return in-memory constants.
 
 `CreateSubscriptionRequest` carries `idempotency_key` directly (not inside a nested bag).
 
+## 4b. `psp_order_id` does NOT exist on `RefundRequest` or `SyncRefundRequest`
+
+Only `SyncPaymentRequest` has `psp_order_id`. `RefundRequest` and `SyncRefundRequest` do not.
+
+| ✗ Wrong | ✓ Right |
+|---|---|
+| `request.psp_order_id` in `refund` flow | `request.order_id` |
+| `request.psp_order_id` in `sync_refund` flow | `request.order_id` |
+| `request.amount` on `RefundRequest` | `request.amount_to_refund` (int\|None) |
+| `request.refund_id` on `SyncRefundRequest` | `request.psp_refund_id` |
+
+PSPs that scope refund endpoints to an order (e.g. `POST /orders/{id}/refunds`,
+`GET /orders/{id}/refunds/{refund_id}`) must use **`request.order_id`** — the merchant
+order id Orbit stored at create-order time. Accessing `request.psp_order_id` on these
+types causes `AttributeError` at runtime (the field does not exist; pydantic's
+`extra="forbid"` would also block construction with it).
+
+Full field inventory for reference:
+
+```
+CreateOrderRequest:    merchant_id, order_id, customer_id, idempotency_key,
+                       amount, return_url, allowed_methods, expires_at, metadata
+SyncPaymentRequest:    merchant_id, order_id, customer_id, idempotency_key, psp_order_id
+RefundRequest:         merchant_id, order_id, customer_id, idempotency_key,
+                       psp_payment_id, refund_id, amount_to_refund, reason
+SyncRefundRequest:     merchant_id, order_id, customer_id, idempotency_key, psp_refund_id
+```
+
+## 4c. `refunded_amount` and `paid_amount` are int minor-units, NOT `Amount`
+
+`SyncPaymentResponse.paid_amount` and `RefundResponse.refunded_amount` /
+`SyncRefundResponse.refunded_amount` are plain `int` (minor units, e.g. paise), not `Amount`.
+
+| ✗ Wrong | ✓ Right |
+|---|---|
+| `paid_amount=Amount(minor_units=…, currency=…)` | `paid_amount=1234` (int) |
+| `refunded_amount=Amount(minor_units=…, currency=…)` | `refunded_amount=1234` (int) |
+
+`PaymentAttempt.amount` is `Amount | None` — that is the only Amount on the response side.
+
 ## 4a. Introspection methods are plain `def`, not `@property`
 
 The `MandateConnector` ABC declares:

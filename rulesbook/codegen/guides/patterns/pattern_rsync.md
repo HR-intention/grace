@@ -10,7 +10,15 @@ The `sync_refund` flow polls the PSP for a refund's current state. The flow is s
 Highlights:
 
 - `request.psp_refund_id: str` — what `refund` returned.
+- `request.order_id: str` — **use this for order-scoped PSP refund-status URLs** (see note below).
 - Response carries `psp_refund_id`, `status: RefundStatus`, optional `refunded_amount: int`, optional `failure_reason: str`.
+
+> **`request.psp_order_id` does NOT exist on `SyncRefundRequest`.**
+> PSPs that scope refund-status endpoints to an order
+> (e.g. `GET /orders/{id}/refunds/{refund_id}`) must use **`request.order_id`** — the
+> merchant order id Orbit stored at create-order time.  Only `SyncPaymentRequest` has
+> `psp_order_id`. Accessing `request.psp_order_id` on a `SyncRefundRequest` raises
+> `AttributeError` at runtime.
 
 ## Method signature (in `connector.py`)
 

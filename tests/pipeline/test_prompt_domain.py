@@ -109,3 +109,21 @@ def test_subscriptions_prompt_pins_mandate_event_fields(tmp_path: Path) -> None:
 def test_prompt_has_auth_none_guard_rule(tmp_path: Path) -> None:
     p = build_prompt(_ctx(tmp_path, "orders"))
     assert "expose" in p and ("Maskable[str] | None" in p or "None-guard" in p or "secret_key" in p)
+
+
+def test_orders_prompt_pins_refund_request_fields(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "orders"))
+    assert "amount_to_refund" in p                         # RefundRequest field
+    assert "psp_order_id" in p                             # named (as NOT on RefundRequest/SyncRefundRequest)
+    assert "order_id" in p
+    # the refund types must be flagged as lacking psp_order_id
+    assert "RefundRequest" in p and "SyncRefundRequest" in p
+    # the self-check grep must call out RefundRequest/SyncRefundRequest + psp_order_id → ZERO
+    assert "RefundRequest|SyncRefundRequest" in p or "psp_order_id" in p
+    # the NO psp_order_id rule must be explicit (not just incidental presence of both strings)
+    assert "no psp_order_id" in p.lower() or "have no psp_order_id" in p.lower() or "RefundRequest.*psp_order_id" in p
+    # refund URL must instruct use of order_id, not psp_order_id
+    assert "request.order_id" in p                         # use order_id for refund URLs
+    # int minor-units rule for refunded_amount / paid_amount (not Amount)
+    assert "refunded_amount" in p and "paid_amount" in p
+    assert "int" in p                                       # int minor-units named
