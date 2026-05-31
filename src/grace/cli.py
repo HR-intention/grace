@@ -237,7 +237,14 @@ def _resolved_tests_dir(cfg: "GraceConfig | None" = None) -> Path | None:
     default=None,
     help="Path to grace config.yaml; defaults to ~/.grace/config.yaml.",
 )
-def generate(psp: str, source: str | None, output: Path | None, config: Path | None) -> None:
+@click.option(
+    "--domain",
+    "domain",
+    type=click.Choice(["orders", "subscriptions", "all"]),
+    default="all",
+    help="Which capability domain to (re)generate.",
+)
+def generate(psp: str, source: str | None, output: Path | None, config: Path | None, domain: str) -> None:
     """Generate a connector package for PSP from the given source."""
     cfg = load_config(config_path=config)
 
@@ -280,6 +287,7 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
             source_version=source,
             repo_root=_repo_root(),
             tests_dir=tests_dir,
+            domain=domain,
         )
         runner = ClaudeCodeRunner(
             cli_path=cfg.claude_code.cli_path, timeout_s=cfg.claude_code.timeout_s

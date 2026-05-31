@@ -88,6 +88,7 @@ def assemble_context(
     source_version: str,
     repo_root: Path,
     tests_dir: Path | None = None,
+    domain: str = "all",
 ) -> GenerationContext:
     """Build the full GenerationContext for a generate run.
 
@@ -111,4 +112,5 @@ def assemble_context(
         source_version=source_version,
         reports_dir=reports_dir,
         tests_dir=resolved_tests_dir,
+        domain=domain,
     )
