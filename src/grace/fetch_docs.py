@@ -237,6 +237,7 @@ def fetch_docs(
     output_dir: Path,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
+    domain: str = "all",
     client: httpx.Client | None = None,
 ) -> FetchDocsResult:
     """Fetch an llms.txt + its filtered markdown pages into `output_dir`.
@@ -245,6 +246,14 @@ def fetch_docs(
     is created if needed; existing `.md` files inside are left untouched (the
     helper writes the filtered set, so re-running with the same args is
     idempotent at file level).
+
+    Pages are routed into per-domain subdirectories under `output_dir`:
+    ``output_dir/_shared/``, ``output_dir/orders/``, and
+    ``output_dir/subscriptions/``.
+
+    ``domain`` selects which capability domain's pages to fetch (``"orders"``,
+    ``"subscriptions"``, or ``"all"``).  If ``include`` or ``exclude`` are
+    passed explicitly they act as manual overrides and bypass the domain preset.
 
     If `client` is None, builds a default httpx.Client with a 30s timeout.
     """
@@ -259,7 +268,12 @@ def fetch_docs(
                 reason=GraceErrorReason.SOURCE_FETCH_FAILED,
                 detail=f"no markdown URLs found in {source}",
             )
-        kept = filter_urls(all_urls, include=include, exclude=exclude)
+        # Use domain-based filtering unless the caller passed explicit
+        # include/exclude overrides (manual override path).
+        if include is not None or exclude is not None:
+            kept = filter_urls(all_urls, include=include, exclude=exclude)
+        else:
+            kept = filter_urls_by_domain(all_urls, domain=domain)
         if not kept:
             raise GraceError(
                 reason=GraceErrorReason.SOURCE_FETCH_FAILED,
@@ -280,8 +294,11 @@ def fetch_docs(
                     reason=GraceErrorReason.SOURCE_FETCH_FAILED,
                     detail=f"GET {url}: {e}",
                 ) from e
+            bucket = bucket_for_url(url)
+            target_dir = output_dir / bucket
+            target_dir.mkdir(parents=True, exist_ok=True)
             fname = derive_filename(url, idx)
-            target = output_dir / fname
+            target = target_dir / fname
             target.write_bytes(resp.content)
             written.append(target)
         return FetchDocsResult(

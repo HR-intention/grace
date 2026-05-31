@@ -1,7 +1,9 @@
 import pytest
 
+import httpx
+
 from grace.errors import GraceError
-from grace.fetch_docs import bucket_for_url, filter_urls_by_domain
+from grace.fetch_docs import bucket_for_url, derive_filename, fetch_docs, filter_urls_by_domain
 
 URLS = [
     "https://x/docs/api-reference/payments/latest/orders/create.md",
@@ -53,3 +55,45 @@ def test_bucket_subscriptions_beats_orders_for_overlap_url() -> None:
 def test_filter_urls_by_domain_raises_on_unknown_domain() -> None:
     with pytest.raises(GraceError):
         filter_urls_by_domain(URLS, domain="bogus")
+
+
+def test_fetch_writes_into_domain_subfolders(tmp_path) -> None:
+    # URLs are written to match the real domain globs used by filter_urls_by_domain.
+    # *api*orders*  -> orders bucket
+    # *subscription/mandate*  -> subscriptions bucket
+    # *api*authentication*  -> _shared bucket
+    pages = {
+        "https://x/api-reference/payments/latest/orders/create.md": b"# orders create",
+        "https://x/api-reference/subscription/mandate/create.md": b"# mandate create",
+        "https://x/api-reference/authentication.md": b"# auth",
+    }
+    llms = "\n".join(pages) + "\n"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("llms.txt"):
+            return httpx.Response(200, text=llms)
+        return httpx.Response(200, content=pages[str(req.url)])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    out = tmp_path / "cashfree"
+    fetch_docs(
+        psp_name="cashfree",
+        source="https://x/llms.txt",
+        output_dir=out,
+        domain="all",
+        client=client,
+    )
+    assert (out / "_shared").is_dir()
+    # Each page should land in the correct bucket directory.
+    assert list((out / "orders").glob("*.md")), "no files in orders bucket"
+    assert list((out / "subscriptions").glob("*.md")), "no files in subscriptions bucket"
+    assert list((out / "_shared").glob("*.md")), "no files in _shared bucket"
+    # Verify the orders page filename contains the URL path segments.
+    orders_files = list((out / "orders").glob("*.md"))
+    assert any("orders" in f.name for f in orders_files), (
+        f"expected orders-path file in orders bucket, got: {[f.name for f in orders_files]}"
+    )
+    subs_files = list((out / "subscriptions").glob("*.md"))
+    assert any("mandate" in f.name for f in subs_files), (
+        f"expected mandate file in subscriptions bucket, got: {[f.name for f in subs_files]}"
+    )

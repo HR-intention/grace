@@ -329,20 +329,33 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
     help="URL or local path of an llms.txt file listing the PSP's doc pages.",
 )
 @click.option(
+    "--domain",
+    "domain",
+    type=click.Choice(["orders", "subscriptions", "all"]),
+    default="all",
+    help=(
+        "Which capability domain's docs to fetch. "
+        "Selects the appropriate URL globs for orders, subscriptions, or both. "
+        "Bypassed when --include/--exclude are provided as manual overrides."
+    ),
+)
+@click.option(
     "--include",
     "include",
     multiple=True,
     help=(
         "Glob to keep (matched against URL path). Repeat for OR. "
-        "Defaults are tuned for hosted-checkout PSPs (orders/payments/refunds/"
-        "webhooks/auth/errors). Out-of-scope sections are excluded by default."
+        "Bypasses the --domain preset when provided."
     ),
 )
 @click.option(
     "--exclude",
     "exclude",
     multiple=True,
-    help="Glob to drop (matched against URL path). Repeat for OR.",
+    help=(
+        "Glob to drop (matched against URL path). Repeat for OR. "
+        "Bypasses the --domain preset when provided."
+    ),
 )
 @click.option(
     "--output",
@@ -355,6 +368,7 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
 def fetch_docs_cmd(
     psp: str,
     source: str,
+    domain: str,
     include: tuple[str, ...],
     exclude: tuple[str, ...],
     output: Path | None,
@@ -370,6 +384,7 @@ def fetch_docs_cmd(
             psp_name=psp,
             source=source,
             output_dir=out,
+            domain=domain,
             include=list(include) if include else None,
             exclude=list(exclude) if exclude else None,
         )

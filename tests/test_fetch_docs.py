@@ -91,13 +91,17 @@ def test_derive_filename_numbered_and_flat() -> None:
 def test_fetch_docs_writes_filtered_files(tmp_path: Path) -> None:
     llms_txt_url = "https://example.com/docs/llms.txt"
 
+    # domain="all" (the new default) includes overview-ts (no *-ts* exclude in
+    # LEGACY_EXCLUDE_GLOBS) and subscription/mandate pages, so we serve them all.
     served: dict[str, bytes] = {
         llms_txt_url: SAMPLE_LLMS_TXT.encode(),
+        "https://www.cashfree.com/docs/api-reference/authentication.md": b"# auth",
+        "https://www.cashfree.com/docs/api-reference/integration-troubleshooting/overview-ts.md": b"# ts",
         "https://www.cashfree.com/docs/api-reference/payments/latest/orders/create.md": b"# create",
         "https://www.cashfree.com/docs/api-reference/payments/latest/orders/get.md": b"# get",
+        "https://www.cashfree.com/docs/api-reference/payments/latest/subscription/mandate/create.md": b"# mandate",
         "https://www.cashfree.com/docs/api-reference/payments/latest/refunds/create.md": b"# rcreate",
         "https://www.cashfree.com/docs/api-reference/payments/latest/refunds/webhooks.md": b"# rwh",
-        "https://www.cashfree.com/docs/api-reference/authentication.md": b"# auth",
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -122,9 +126,13 @@ def test_fetch_docs_writes_filtered_files(tmp_path: Path) -> None:
     assert any("refunds_create" in n for n in names)
     assert any("refunds_webhooks" in n for n in names)
     assert any("authentication" in n for n in names)
-    # 8 URLs in sample; default filter drops subscriptions + previous + ts → 5 kept.
-    assert len(result.files_written) == 5
-    assert result.skipped_count == 3
+    # 8 URLs in sample; domain="all" drops only the previous/* URL → 7 kept, 1 skipped.
+    assert len(result.files_written) == 7
+    assert result.skipped_count == 1
+    # Files are bucketed: orders/ subscriptions/ _shared/ subdirs exist.
+    assert (out / "orders").is_dir()
+    assert (out / "subscriptions").is_dir()
+    assert (out / "_shared").is_dir()
     # Each file has the served body.
     for p in result.files_written:
         body = p.read_text()
@@ -173,11 +181,17 @@ def test_fetch_docs_reads_local_llms_txt(tmp_path: Path) -> None:
         return httpx.Response(200, content=b"# stub", request=request)
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
+    out = tmp_path / "out"
     result = fetch_docs(
         psp_name="cashfree",
         source=str(llms_txt_path),
-        output_dir=tmp_path / "out",
+        output_dir=out,
         client=client,
     )
     client.close()
-    assert len(result.files_written) == 5
+    # domain="all" (default) keeps 7 of 8 URLs; only previous/* is dropped.
+    assert len(result.files_written) == 7
+    # Files land in bucket subdirs, not flat in output_dir.
+    assert (out / "orders").is_dir()
+    assert (out / "subscriptions").is_dir()
+    assert (out / "_shared").is_dir()
