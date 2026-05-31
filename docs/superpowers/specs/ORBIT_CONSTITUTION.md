@@ -1,7 +1,7 @@
 # Orbit Constitution
 
-**Status**: v0.4 — Order + PaymentAttempt two-entity model; Orbit-first creation; simplified status enums.
-**Date**: 2026-05-20.
+**Status**: v0.5 — Periodic subscription-mandate support (Phase 3); capability-interface model; shared WebhookRouter.
+**Date**: 2026-05-30.
 **Owner**: Sarthak (engineering@symplora.com).
 **Scope**: governs all sub-projects under the Orbit umbrella. Sub-project specs inherit by cross-reference; conflicts resolve in favor of this document until revised.
 
@@ -22,7 +22,9 @@ Plus a third entity that hangs off the successful attempt:
 
 - **Refund** — initiated by the merchant against the successful PaymentAttempt under an Order. One Order has 0..N Refunds. Cumulative refund amount can be at most the paid amount.
 
-**Out of scope for v1** but on the longer-term roadmap: subscriptions and recurring mandates, billing-cycle logic, invoice generation, **direct-API / server-to-server payment flows** (`authorize`, `capture`, `void` with raw instrument data — see `FUTURE_S2S_INTERFACE.md`). Each lands as a follow-up product slice gated by v1 stability. Anything else (payouts, disputes, tax, KYC, settlement reconciliation) is also out of scope until explicitly added by a future revision.
+**Phase 3 (now in scope)**: periodic subscription mandates — UPI Autopay and card e-mandate, INR, periodic/PSP-scheduled debit mode. Lens is stateless; Cashfree owns the debit schedule, retry, and notification. On-demand / merchant-triggered debit (`execute_mandate_debit` / `notify_pre_debit`) remains out of scope.
+
+**Out of scope for v1** but on the longer-term roadmap: on-demand mandate debit, billing-cycle logic, invoice generation, **direct-API / server-to-server payment flows** (`authorize`, `capture`, `void` with raw instrument data — see `FUTURE_S2S_INTERFACE.md`). Each lands as a follow-up product slice gated by v1 stability. Anything else (payouts, disputes, tax, KYC, settlement reconciliation) is also out of scope until explicitly added by a future revision.
 
 To deliver Orbit, two supporting sub-projects exist underneath:
 
@@ -43,8 +45,8 @@ Orbit is composed of three named sub-projects. Each has its own home, owner, and
 - Spec: `SUBPROJECT_ORBIT_PRODUCT.md`
 
 **Lens (the unified PSP library)** — Layer 2.
-- Location: `/Users/sarthak/PycharmProjects/references/lens/`
-- Role: a stateless Python library. Exposes `PaymentsFacade`, `ConnectorFactory`, a `Connector` ABC, and the domain types (request/response models per flow, the `PaymentAttempt` model, `WebhookEvent`, error types). Hosts the per-PSP `Connector` implementations (Cashfree first). Talks to PSPs via httpx. No DB. No HTTP server. No global mutable state.
+- Location: `/Users/sarthak/PycharmProjects/symplora/sylibs/packages/lens/` — a package inside the `sylibs` monorepo. Published to Symplora's private PyPI (SyPI) as `lens`.
+- Role: a stateless Python library. Exposes `PaymentsFacade`, `MandatesFacade`, `ConnectorFactory`, a `Connector` thin-base ABC with `PaymentsConnector` / `MandateConnector` capability interfaces, a shared `WebhookRouter`, and the domain types (request/response models per flow, the `PaymentAttempt` model, mandate domain types, `PaymentWebhookEvent` / `MandateWebhookEvent`, error types). Hosts the per-PSP connector implementations (Cashfree first). Talks to PSPs via httpx. No DB. No HTTP server. No global mutable state.
 - **References juspay-prism's `crates/` for inspiration on the registry pattern and error normalization — but does not mirror it line-for-line.** Juspay-prism's Rust trait generics (`ConnectorIntegrationV2<Flow, RCD, Req, Resp>`, `RouterData`, phantom flow types) are deliberately not ported. Pythonic equivalent: one `Connector` class per PSP with four async flow methods + webhook + close. Detailed in `SUBPROJECT_LENS.md`.
 - Spec: `SUBPROJECT_LENS.md`
 
@@ -72,7 +74,7 @@ Sub-project boundaries are **locked**. A change crossing a boundary requires upd
         │    ledger and state machines            │
         │  • Webhook receiver (public endpoint)   │
         │  • Idempotency store                    │
-        │  • Janitor (in-flight Order recovery)   │
+        │  • Inline-resume + housekeeping cron    │
         │  • Persistence (Postgres)               │
         └─────────────────┬───────────────────────┘
                           │ in-process Python import
@@ -81,15 +83,20 @@ Sub-project boundaries are **locked**. A change crossing a boundary requires upd
         │ Lens (library, stateless)               │
         │  • PaymentsFacade  (thin wrapper:       │
         │     logging + error normalization)      │
-        │  • Connector ABC                        │
-        │     - create_order                      │
-        │     - sync_payment                      │
-        │     - refund                            │
-        │     - sync_refund                       │
-        │     - handle_webhook                    │
-        │     - close                             │
+        │  • MandatesFacade  (same pattern)       │
+        │  • Connector  (thin base ABC)           │
+        │  • PaymentsConnector(Connector)         │
+        │     - create_order / sync_payment       │
+        │     - refund / sync_refund              │
+        │  • MandateConnector(Connector)          │
+        │     - create/sync/cancel/pause/resume   │
+        │     - introspection (rails/intervals/…) │
+        │  • WebhookRouter (verify once, route    │
+        │     by family → PaymentWebhookEvent |   │
+        │     MandateWebhookEvent)                │
         │  • ConnectorFactory (registry)          │
-        │  • Domain types incl. PaymentAttempt    │
+        │  • Domain types incl. PaymentAttempt,   │
+        │    mandate types, FAILURE_CLASS         │
         └─────────────────┬───────────────────────┘
                           │ httpx (each Connector owns its client)
                           ▼
@@ -102,14 +109,14 @@ Sub-project boundaries are **locked**. A change crossing a boundary requires upd
 
 - Lens never opens a listening socket. Pure Python library.
 - Lens never reads or writes a database. Stateless.
-- One `Connector` class per PSP. Each class owns its own httpx client and implements the four async flow methods plus `handle_webhook` and `close`.
+- One `Connector` class per PSP. Each class owns its own httpx client and implements at least one capability interface (`PaymentsConnector`, `MandateConnector`, or both). `ConnectorFactory.register` enforces this — bare `Connector` subclasses that implement no capability interface are rejected with `INVALID_REQUEST`. `handle_webhook` is no longer on any connector; webhook handling lives in the shared `WebhookRouter`.
 - Cross-cutting concerns (structured logging, retries, error normalization, PII masking) are applied via:
   - `PaymentsFacade` (thin wrapper around the `Connector`): binds request id, logs start/end, normalizes any leaking exceptions into `ConnectorError`.
   - The httpx client (configured per Connector): retry transport, timeout, event hooks for masked logging.
   - The `Maskable[T]` type wrapper: any PII field declared `Maskable[...]` stringifies as `***`, so it can't accidentally leak into a log line.
 - Orbit is the only process boundary. All HTTP ingress (consumer requests + PSP webhooks) terminates at Orbit.
 - **Orbit-first persistence.** Every external state-changing action (PSP `create_order`, `refund`) is preceded by writing an Orbit row. The Orbit record is the source of truth for "did we already start this?". See `SUBPROJECT_ORBIT_PRODUCT.md` for the recovery flow.
-- Webhook flow: PSP → Orbit's public webhook endpoint → Orbit calls `PaymentsFacade.incoming_webhook(raw_payload, headers)` → Lens verifies signature + parses payload → returns a `WebhookEvent` carrying a `PaymentAttempt` and/or `RefundEvent` → Orbit dedups against its own store → Orbit updates the relevant entity.
+- Webhook flow: PSP → Orbit's public webhook endpoint → Orbit calls `WebhookRouter.handle(raw_payload, headers)` (obtained via `ConnectorFactory.create_webhook_router(config)`) → the router verifies the PSP signature once and routes by event family → returns `PaymentWebhookEvent | MandateWebhookEvent` → Orbit dedups against its own store → Orbit updates the relevant entity (Order/PaymentAttempt/Refund for payment events; subscription record for mandate events). Migration note: `PaymentsFacade.incoming_webhook` has been removed; callers must obtain a `WebhookRouter` from the factory instead.
 
 **Ruled out for v1**:
 
@@ -184,23 +191,37 @@ If any gate fails, Grace surfaces the failure and does not write the package to 
 
 These are the named interfaces between sub-projects. **Locked** — SemVer-major bump to break.
 
-**`PaymentsFacade`** (Lens → Orbit). The class Orbit holds and calls. Async methods: `create_order`, `sync_payment`, `refund`, `sync_refund`, `incoming_webhook`, `close`. Thin wrapper that adds request-id binding, structured logging, and error normalization around a `Connector`. Signatures pinned in `SUBPROJECT_LENS.md`.
+**`PaymentsFacade`** (Lens → Orbit). The class Orbit holds and calls for payment flows. Async methods: `create_order`, `sync_payment`, `refund`, `sync_refund`, `close`. Thin wrapper that adds request-id binding, structured logging, and error normalization around a `PaymentsConnector`. `incoming_webhook` has been removed from this facade; webhook handling is now the shared `WebhookRouter` (see below). Signatures pinned in `SUBPROJECT_LENS.md`.
 
-**`ConnectorFactory`** (Lens → Orbit). Class-method API: `register(name, connector_cls)`, `create(config) -> Connector`, `list_connectors() -> list[str]`. Generated connector modules self-register via `register` on import. `register` validates that `connector_cls().name == name` and that `connector_cls.requires_lens` (semver constraint) is satisfied by the running Lens version; otherwise raises `ConnectorError(reason=INCOMPATIBLE_VERSION)` or `ConnectorError(reason=INVALID_REQUEST)`.
+**`ConnectorFactory`** (Lens → Orbit). Class-method API: `register(name, connector_cls)`, `create(config) -> Connector`, `list_connectors() -> list[str]`, `create_payments_facade(config) -> PaymentsFacade`, `create_mandates_facade(config) -> MandatesFacade`, `create_webhook_router(config) -> WebhookRouter`, `register_webhook(name, build_handlers)`. Generated connector modules self-register via `register` and `register_webhook` on import. `register` validates that the class's `name` property matches the registry key, that `requires_lens` is satisfied by the running Lens version, and that the class implements at least one capability interface (`PaymentsConnector` or `MandateConnector`); raises `ConnectorError(reason=INCOMPATIBLE_VERSION)` or `ConnectorError(reason=INVALID_REQUEST)` on failure. `create_mandates_facade` raises `ConnectorError(reason=NOT_SUPPORTED)` if the registered connector does not implement `MandateConnector`.
 
-**`Connector`** ABC (Lens → per-PSP implementations). One class per PSP. Async methods: `create_order`, `sync_payment`, `refund`, `sync_refund`, `handle_webhook`, `close`. Properties: `name`, `base_url`, `supported_methods`, `supports_idempotency_key`. Each Connector owns its own `httpx.AsyncClient`.
+**`Connector`** thin-base ABC (Lens → per-PSP implementations). Never implemented directly. Properties: `name`, `base_url`. Async method: `close`. Each PSP connector class implements one or more capability interfaces that extend this base:
+
+- **`PaymentsConnector(Connector)`** — the payment-flow capability. Properties: `supported_methods`, `supports_idempotency_key`. Async methods: `create_order`, `sync_payment`, `refund`, `sync_refund`.
+- **`MandateConnector(Connector)`** — the mandate/subscription capability. Plain methods (introspection, one takes a `rail` argument): `supported_mandate_rails`, `supports_pause`, `supported_intervals`, `max_mandate_amount`. Async methods (lifecycle): `create_subscription`, `sync_subscription`, `cancel_subscription`, `pause_subscription`, `resume_subscription`.
+
+Webhook handling is no longer on any connector — it belongs to the shared `WebhookRouter` (see below). Each Connector owns its own `httpx.AsyncClient`.
+
+**`MandatesFacade`** (Lens → Orbit). The class Orbit holds for mandate/subscription flows. Async lifecycle methods: `create_subscription`, `sync_subscription`, `cancel_subscription`, `pause_subscription`, `resume_subscription`, `close`. Sync introspection pass-throughs: `supported_mandate_rails`, `supports_pause`, `supported_intervals`, `max_mandate_amount`. Signatures pinned in `SUBPROJECT_LENS.md`.
+
+**`WebhookRouter`** / **`WebhookHandlers`** / **`WebhookFamily`** (Lens → Orbit). The shared webhook handling surface. Orbit obtains a `WebhookRouter` via `ConnectorFactory.create_webhook_router(config)`. The router's single async method `handle(raw_payload: bytes, headers: dict[str, str]) -> PaymentWebhookEvent | MandateWebhookEvent` verifies the PSP signature once (via the `WebhookHandlers.verify` callable) and routes by event family (`WebhookFamily.PAYMENT` or `WebhookFamily.MANDATE`) to the appropriate parser. `WebhookHandlers` is a frozen dataclass holding the `verify`, `classify`, `parse_payment`, and `parse_mandate` callables supplied by the PSP package. Unknown family raises `ConnectorError(reason=NOT_SUPPORTED)`. Signatures pinned in `SUBPROJECT_LENS.md`.
 
 **Domain types** (Lens → Orbit, Lens → Grace). Frozen Pydantic models that flow across the Orbit ↔ Lens boundary. Key types:
 
-- Per-flow request/response models: `CreateOrderRequest`/`CreateOrderResponse`, `SyncPaymentRequest`/`SyncPaymentResponse`, `RefundRequest`/`RefundResponse`, `SyncRefundRequest`/`SyncRefundResponse`.
-- `PaymentAttempt` — one attempt by a payer against an Order. Returned in lists from `sync_payment` and individually inside `WebhookEvent`.
-- `RefundEvent` — one refund-status update, carried inside `WebhookEvent` for refund-related events.
-- `WebhookEvent` — the parsed, normalized form of an inbound PSP event; carries `attempt: PaymentAttempt | None` and `refund: RefundEvent | None` depending on the event type.
+- Per-flow request/response models (payments): `CreateOrderRequest`/`CreateOrderResponse`, `SyncPaymentRequest`/`SyncPaymentResponse`, `RefundRequest`/`RefundResponse`, `SyncRefundRequest`/`SyncRefundResponse`.
+- `PaymentAttempt` — one attempt by a payer against an Order. Returned in lists from `sync_payment` and individually inside `PaymentWebhookEvent`.
+- `RefundEvent` — one refund-status update, carried inside `PaymentWebhookEvent` for refund-related events.
+- `PaymentWebhookEvent` — the parsed, normalized form of an inbound PSP payment/refund event (renamed from `WebhookEvent`); carries `attempt: PaymentAttempt | None` and `refund: RefundEvent | None` depending on the event type.
+- Per-flow request/response models (mandates): `CreateSubscriptionRequest`/`CreateSubscriptionResponse`, `SyncSubscriptionRequest`/`SyncSubscriptionResponse`, `ManageMandateRequest`/`ManageMandateResponse`. Common base: `MandateRequestCommon` (fields: `merchant_id` only — no `order_id`; mandates are not orders). Supporting types: `CustomerContact` (email + phone), `ApprovalHandle` (type/url/session_id/raw).
+- `MandateDebitOutcome` — outcome of one PSP-scheduled debit attempt. Frozen. Carried on `MandateWebhookEvent.debit` and `SyncSubscriptionResponse.last_debit`.
+- `MandateWebhookEvent` — the parsed, normalized form of an inbound PSP mandate/subscription event; carries `mandate_status`, `debit: MandateDebitOutcome | None`, and `psp_mandate_ref`.
 - Three separate status enums (no overloaded "AttemptStatus"):
   - `OrderStatus`: `CREATED`, `PAID`, `PARTIALLY_REFUNDED`, `REFUNDED`, `EXPIRED`, `FAILED`.
   - `PaymentAttemptStatus`: `PENDING`, `SUCCESS`, `FAILED`.
   - `RefundStatus`: `PENDING`, `SUCCESS`, `FAILED`.
-- `PaymentFailureCode` enum — a locked taxonomy for *why* a payment attempt failed (`USER_DROPPED`, `USER_CANCELLED`, `CARD_DECLINED`, `INSUFFICIENT_FUNDS`, `AUTHENTICATION_FAILED`, `FRAUD_BLOCKED`, `FRAUD_REVIEW_PENDING`, `INVALID_INSTRUMENT`, `PSP_ERROR`, `NETWORK_ERROR`, `UNKNOWN`). Carried on `PaymentAttempt.failure_code`.
+- `PaymentFailureCode` enum — a locked taxonomy for *why* a payment or mandate debit failed. Original values: `USER_DROPPED`, `USER_CANCELLED`, `CARD_DECLINED`, `INSUFFICIENT_FUNDS`, `AUTHENTICATION_FAILED`, `FRAUD_BLOCKED`, `FRAUD_REVIEW_PENDING`, `INVALID_INSTRUMENT`, `PSP_ERROR`, `NETWORK_ERROR`, `UNKNOWN`. Extended in v0.2.0 with mandate values: `MANDATE_REVOKED`, `MANDATE_PAUSED`, `MANDATE_EXPIRED`, `MANDATE_NOT_FOUND`, `DEBIT_LIMIT_EXCEEDED`. Carried on `PaymentAttempt.failure_code` and `MandateDebitOutcome.failure_code`.
+- New mandate enums: `MandateRail` (`UPI_AUTOPAY`, `CARD_EMANDATE`), `MandateStatus` (8 values), `MandateIntervalType` (`DAY`, `WEEK`, `MONTH`, `YEAR`), `MandateDebitStatus` (`PENDING`, `SUCCESS`, `FAILED`). Extended `WebhookEventType` with 13 `MANDATE_*` values.
+- `FailureClass` enum (`RETRIABLE`, `TERMINAL`) + `FAILURE_CLASS` (frozen `MappingProxyType[PaymentFailureCode, FailureClass]`) — published classification data; lens never acts on it. Orbit reads it to decide `charge_failed` vs `charge_failed_final`.
 - Shared types: `Amount` (= minor units + currency), `Currency`, `PaymentMethod`, `Maskable[T]`, `ConnectorError`, `ConnectorErrorReason`.
 
 `PaymentMethod` in v1 is used as an allow-list constraint passed to the PSP (for hosted-checkout method allow-listing) and as a value read back on a successful attempt. Never expanded into a per-method request builder.
@@ -224,7 +245,7 @@ Apply across all three sub-projects unless a sub-project spec is explicitly stri
 - **Python ≥ 3.11.** Modern type syntax (`X | Y`, `list[X]`). Async everywhere on the request/response path; sync work via `asyncio.to_thread`.
 - **`mypy --strict` mandatory.** No `Any`. `# type: ignore` requires a scoped, commented reason.
 - **Pydantic v2 at every public boundary.** `ConfigDict(extra="forbid", frozen=True)` on requests; `frozen=False` only where post-creation field assignment is required. No raw dicts crossing public APIs.
-- **Structured logging only** (`structlog`). PII fields typed `Maskable[T]` so they stringify as `***`. Forbidden in logs even masked: full PAN, CVV, full bank account numbers.
+- **Structured JSON logging only.** The logging library is a per-sub-project choice — Orbit uses stdlib `logging` with a `sykit`-based JSON formatter (not `structlog`). PII fields typed `Maskable[T]` so they stringify as `***`. Forbidden in logs even masked: full PAN, CVV, full bank account numbers.
 - **State discipline.** Lens is stateless (no DB, no file I/O beyond httpx). Orbit owns persistent state. The only global mutable state allowed in Lens is `ConnectorFactory._registry` (write-once at import).
 - **Errors.** Public APIs raise typed errors with `reason` enums (`ConnectorError`, `OrbitError`). Provider-specific errors are normalized inside each `Connector` method or by `PaymentsFacade`, never bubbled up raw.
 - **Orbit-first persistence.** Every action that mutates external state (create_order at the PSP, refund at the PSP) is preceded by a local Orbit row write. Recovery and idempotency depend on this discipline.
@@ -243,19 +264,20 @@ Apply across all three sub-projects unless a sub-project spec is explicitly stri
 - Order ledger and state machine: `CREATED → PAID → (PARTIALLY_REFUNDED | REFUNDED)`, with `EXPIRED` and `FAILED` terminals.
 - PaymentAttempt ledger and state machine: `PENDING → (SUCCESS | FAILED)`, with `failure_code` carrying granularity (`USER_DROPPED`, `CARD_DECLINED`, etc.).
 - Refund ledger and state machine: `PENDING → (SUCCESS | FAILED)`.
-- Orbit-first creation flow with janitor recovery for orders stuck in flight.
+- Orbit-first creation flow with inline-resume recovery for orders stuck in flight (a retry with the same idempotency key resumes against the same deterministic PSP key); an `orbit-housekeeping` cron sweeps expiries and prunes idempotency keys.
 - Idempotency on every state-mutating endpoint.
 - Webhook receiver endpoint that delegates verification + parsing to Lens, dedups locally, and updates the relevant entity.
 - One configured PSP (Cashfree) wired end-to-end.
 
 *Lens:*
 
-- `Connector` ABC + `PaymentsFacade` + `ConnectorFactory` + domain types (including `PaymentAttempt`, the three status enums, `PaymentFailureCode`).
-- One PSP: Cashfree (existing in Plan C, restructured to match the ABC).
+- `Connector` thin-base ABC + `PaymentsConnector` / `MandateConnector` capability interfaces + `PaymentsFacade` + `MandatesFacade` + `ConnectorFactory` + `WebhookRouter` + domain types (including `PaymentAttempt`, the three payment status enums, `PaymentFailureCode`, mandate domain types, `FailureClass`, `FAILURE_CLASS`).
+- One PSP: Cashfree (quarantined pending Grace regeneration against 0.2.0 ABCs).
 - **Hosted-checkout / session-based integration only.** v1 does not accept raw card, UPI, wallet, or other instrument data at the Lens boundary.
-- Four flow methods: `create_order`, `sync_payment`, `refund`, `sync_refund`. Plus `handle_webhook` and `close`.
+- Four payment flow methods: `create_order`, `sync_payment`, `refund`, `sync_refund`. Five mandate lifecycle methods: `create_subscription`, `sync_subscription`, `cancel_subscription`, `pause_subscription`, `resume_subscription`. Lifecycle management: `close`.
 - `sync_payment` returns the order's overall `OrderStatus` and the list of `PaymentAttempt`s the PSP knows about.
-- `handle_webhook` returns a `WebhookEvent` carrying a `PaymentAttempt` (for payment-level events) or `RefundEvent` (for refund-level events).
+- `WebhookRouter.handle(raw_payload, headers)` verifies the signature once and returns `PaymentWebhookEvent | MandateWebhookEvent` by event family. (`PaymentsFacade.incoming_webhook` is retired.)
+- Periodic mandate mode (UPI Autopay + card e-mandate, INR): Lens is stateless; Cashfree owns schedule, retry, and notification.
 - httpx-based HTTP execution with timeouts, retries (configurable, idempotency-key passthrough), structured logging.
 
 *Grace:*
@@ -266,7 +288,7 @@ Apply across all three sub-projects unless a sub-project spec is explicitly stri
 
 **Out of scope for v1** (later product slices)
 
-- Subscriptions, recurring mandates.
+- On-demand / merchant-triggered mandate debit (`execute_mandate_debit` / `notify_pre_debit`). Periodic mandates are now Phase 3 in-scope (see §1 and above).
 - Billing-cycle logic and invoice document generation.
 - 3DS-specific flows beyond what the PSP handles on its hosted page.
 - **Direct-API / server-to-server payment flows.** Future-scope design captured in `FUTURE_S2S_INTERFACE.md`.
@@ -288,7 +310,7 @@ Each sub-project ships independently with its own SemVer.
 
 **"Locked"** means: change requires (1) a constitution revision with a dated changelog entry, (2) coordinated updates in every dependent sub-project, (3) a migration plan for affected generated connectors and persisted data.
 
-Locked things: every type and method named in §5; the four v1 flows; the three status enums and their values; the `PaymentFailureCode` taxonomy; the file-header marker format in §4; the dependency order in §9.
+Locked things: every type and method named in §5; the four payment flows (`create_order`, `sync_payment`, `refund`, `sync_refund`); the five mandate lifecycle flows (`create_subscription`, `sync_subscription`, `cancel_subscription`, `pause_subscription`, `resume_subscription`); the three payment status enums and their values; `MandateStatus`, `MandateRail`, `MandateIntervalType`, `MandateDebitStatus` and their values; the `PaymentFailureCode` taxonomy (including the five mandate-related codes added in v0.2.0); `FailureClass`, `FAILURE_CLASS`; `PaymentWebhookEvent`, `MandateWebhookEvent`, `MandateDebitOutcome`, `ApprovalHandle`, `CustomerContact`, `MandateRequestCommon`, and all mandate request/response models; `WebhookRouter`, `WebhookHandlers`, `WebhookFamily`; the capability-interface split (`Connector` thin base, `PaymentsConnector`, `MandateConnector`); `MandatesFacade`; the new `ConnectorFactory` methods (`create_payments_facade`, `create_mandates_facade`, `create_webhook_router`, `register_webhook`); the file-header marker format in §4; the dependency order in §9.
 
 **Compatibility rules**
 
@@ -318,11 +340,13 @@ Step 1 ─ Lock interface ──────────────────
         - request/response models per flow
         - PaymentAttempt model
         - RefundEvent
-        - WebhookEvent (carries attempt/refund)
+        - PaymentWebhookEvent (carries attempt/refund; renamed from WebhookEvent in v0.5)
         - OrderStatus, PaymentAttemptStatus, RefundStatus enums
         - PaymentFailureCode taxonomy
         - Amount, PaymentMethod, Currency, Maskable, ConnectorError
-    - Connector ABC (4 async flow methods + handle_webhook + close)
+    - Connector thin-base ABC + PaymentsConnector / MandateConnector
+      capability interfaces (v0.5; webhook handling is the shared
+      WebhookRouter, not a connector method)
     - ConnectorFactory (register / create / list_connectors)
     - PaymentsFacade signature (thin wrapper)
   Output is the locked spec; Lens and Grace both point
@@ -360,8 +384,9 @@ Step 5 ─ End-to-end generation test ──────────────
 Step 6 ─ Build Orbit ────────────────────────────────────────────
   HTTP API on /v1/orders/*, Order + PaymentAttempt + Refund
   ledger, state machines, idempotency middleware, webhook
-  receiver + async worker, Orbit-first creation flow, janitor
-  job for in-flight orders. Integrate Lens.
+  receiver (inline processing), Orbit-first creation flow with
+  inline-resume recovery, an orbit-housekeeping cron (expiry
+  sweep + idempotency prune). Integrate Lens.
   End-to-end payment flows against a Cashfree sandbox.
 ```
 
@@ -418,11 +443,7 @@ Each item: question, current default assumption (used by sub-project specs until
 - **Default**: a consumer app needs a payment surface that hosted-checkout can't cover (recurring with stored credentials, in-app instrument capture). Until that need surfaces concretely, s2s stays in the future-scope doc.
 - **Resolved by**: product decision; revisit at every quarterly review.
 
-**OQ-10. Janitor cadence + recovery policy.** Orders with `psp_order_id IS NULL` and `created_at < now() - 5 minutes` need either re-attempt or terminal `FAILED` marking.
-
-- **Default**: janitor runs every minute; recovers by re-calling `create_order` with the same idempotency key (PSP dedups). After 3 failed recovery attempts, marks order `FAILED`.
-- **Impact if wrong**: if cadence is too aggressive, we hit PSP rate limits; too slow, consumers see latency on retries.
-- **Resolved by**: `SUBPROJECT_ORBIT_PRODUCT.md`.
+**OQ-10. ~~Janitor cadence + recovery policy~~** — *Resolved in Orbit v1.* In-flight recovery is **inline-resume on create**, not a separate janitor job. `services/order_creation.py` commits the Orbit row before the PSP call and derives a deterministic PSP key (`orbit-create-order-{order_id}`); a caller retry with the same idempotency key resumes the same PSP call (PSP dedups). Consequences: no background re-attempt loop, no `recovery_attempts` column, no advisory-lock leadership election. A separate `orbit-housekeeping` Lambda (EventBridge `rate(1 minute)`) sweeps expired `CREATED` orders → `EXPIRED`, prunes idempotency keys, reconciles active mandates, and drains the consumer-webhook delivery queue; stuck in-flight orders that are never retried simply expire via that sweep.
 
 ---
 
@@ -433,3 +454,6 @@ Each item: question, current default assumption (used by sub-project specs until
 - **2026-05-20 v0.3** — drop direct-API / server-to-server flows from v1. The four v1 flow methods are `create_order`, `sync_payment`, `refund`, `sync_refund`. `authorize` / `capture` / `void` moved to `FUTURE_S2S_INTERFACE.md`.
 - **2026-05-20 v0.4** — introduce the two-entity model: **Order** (entity 1) + **PaymentAttempt** (entity 2). Split the overloaded `AttemptStatus` into three enums: `OrderStatus`, `PaymentAttemptStatus`, `RefundStatus`. Simplify `PaymentAttemptStatus` to three states (`PENDING`, `SUCCESS`, `FAILED`) with a locked `PaymentFailureCode` taxonomy carrying the granularity. Lock in **Orbit-first persistence** as a cross-cutting rule. Rename Orbit's HTTP namespace from `/v1/transactions` to `/v1/orders`. New OQ-10 covers the janitor's recovery cadence.
 - **2026-05-20 v0.4 (consistency pass)** — applied 17 findings from cross-doc review: add `USER_CANCELLED` to the `PaymentFailureCode` list in §5; tighten `ConnectorFactory.register` signature + name/version validation; resolve python-support branch lifecycle (merges into main on v1 acceptance); add `IDEMPOTENCY_IN_FLIGHT` / `NOT_SUPPORTED` / `INCOMPATIBLE_VERSION` error reasons; add `merchant_id` column + `psp_merchant_id` semantics; make `customer_id` `NOT NULL`; echo `amount` + `currency` in `POST /v1/orders` 201; remove the per-file 60% coverage requirement from Lens (keep package ≥ 80%); add `Maskable[T]` requirement and PII enumeration to Orbit §5; carve out the Decimal exception for PSP wire-level transforms in Ground Rule 10; fix `Cashfree.name` to `@property`; correct s2s state count in `FUTURE_S2S` (three → five).
+- **2026-05-21 v0.4 (lens migration to sylibs)** — metadata-only update. Lens relocates from `/Users/sarthak/PycharmProjects/references/lens/` to `/Users/sarthak/PycharmProjects/symplora/sylibs/packages/lens/` as the 6th package in the `sylibs` monorepo. Published to SyPI (Symplora's private PyPI) as `lens`. No public-surface impact: `lens.__all__` is unchanged, the `Connector` ABC + `PaymentsFacade` + `ConnectorFactory` + every domain type and enum keep their locked names and signatures. The §9 Step ordering, the §4 generated-file marker format, and the §8 versioning policy are all unaffected. Updated `Location:` fields in §2 (Lens row), `SUBPROJECT_LENS.md` §1, and `SUBPROJECT_ORBIT_PRODUCT.md` §4 dependency description. Grace's `SUBPROJECT_GRACE_CODEGEN.md` §3.2 retains the per-PSP layout (`connectors/<psp>/`); only the absolute root path Grace writes to changes (now `<sylibs>/packages/lens/src/lens/connectors/<psp>/`).
+- **2026-05-31 v0.5 (accuracy pass)** — doc-correctness sweep against the shipped Orbit implementation; no spec/contract changes. §6: replace the hard `structlog` mandate with "structured JSON logging" (library is a per-sub-project choice; Orbit uses stdlib `logging` + a `sykit` JSON formatter). §9 Step 1: fix stale `WebhookEvent` → `PaymentWebhookEvent` and the `Connector ABC (… + handle_webhook …)` line → the v0.5 capability split (`PaymentsConnector`/`MandateConnector`; webhook handling on the shared `WebhookRouter`). Reconcile the "janitor" recovery narrative (§3 box, §7, §9 Step 6, OQ-10) to the implemented **inline-resume on create** + `orbit-housekeeping` cron — there is no janitor job, no `recovery_attempts` column, and no advisory-lock election. `SUBPROJECT_ORBIT_PRODUCT.md` updated in the same pass.
+- **2026-05-30 v0.5** — Periodic subscription-mandate support (Phase 3). Bring periodic mandates (UPI Autopay + card e-mandate, INR) into scope (§1/§7); on-demand debit remains out of scope. Add capability-interface model: `Connector` reshaped to thin base (`name`, `base_url`, `close`); `PaymentsConnector(Connector)` carries the four payment flows + `supported_methods`/`supports_idempotency_key`; `MandateConnector(Connector)` carries five lifecycle methods + four introspection methods. Add `MandatesFacade` (wraps a `MandateConnector`). Add shared `WebhookRouter` (obtained via `ConnectorFactory.create_webhook_router(config)`); its `handle(raw_payload, headers)` verifies the signature once and routes by `WebhookFamily` (PAYMENT / MANDATE), returning `PaymentWebhookEvent | MandateWebhookEvent`. Remove `PaymentsFacade.incoming_webhook` (migration: use `WebhookRouter`). Rename `WebhookEvent` → `PaymentWebhookEvent`. Add mandate domain types: `CreateSubscriptionRequest/Response`, `SyncSubscriptionRequest/Response`, `ManageMandateRequest/Response`, `CustomerContact`, `ApprovalHandle`, `MandateDebitOutcome`, `MandateWebhookEvent`, `MandateRequestCommon`. Add mandate enums: `MandateRail`, `MandateStatus`, `MandateIntervalType`, `MandateDebitStatus`, `FailureClass`; extend `WebhookEventType` (+13 `MANDATE_*` values) and `PaymentFailureCode` (+5 mandate values). Add `FAILURE_CLASS` (frozen `MappingProxyType`, published data only). Add `ConnectorFactory` methods: `create_payments_facade`, `create_mandates_facade`, `create_webhook_router`, `register_webhook`; add capability guard to `register`. All new symbols added to §5 and §8 locked set. lens bumped to 0.2.0 (breaking surface change); the Cashfree connector is quarantined pending Grace regeneration against the new ABCs.
