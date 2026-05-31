@@ -6,19 +6,15 @@ from ..core.base import _DemoBase
 
 
 class DemoSubscriptions(_DemoBase, MandateConnector):
-    @property
     def supported_mandate_rails(self) -> set[str]:
         return {"UPI_AUTOPAY"}
 
-    @property
     def supports_pause(self) -> bool:
         return True
 
-    @property
     def supported_intervals(self) -> set[str]:
         return {"MONTHLY", "WEEKLY"}
 
-    @property
     def max_mandate_amount(self) -> int:
         return 100000
 
