@@ -163,7 +163,9 @@ def test_pipeline_raises_when_rubric_fails(tmp_path: Path) -> None:
         source_version="x",
         reports_dir=tmp_path / "_reports",
     )
-    runner = _StubRunner(files=[])
+    runner = _StubRunner(files=[
+        ("orders/connector.py", "class DemoOrders:\n    pass\n"),
+    ])
     with pytest.raises(GraceError) as exc:
         asyncio.run(run_pipeline(ctx=ctx, runner=runner, hooks=PipelineHooks(run_gates=True)))
     assert exc.value.reason is GraceErrorReason.QUALITY_GATE_FAILED

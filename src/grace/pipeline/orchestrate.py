@@ -73,6 +73,13 @@ async def run_pipeline(
     """
     result = await runner.generate(ctx)
 
+    from grace.pipeline.compose import write_compose_surface
+    write_compose_surface(
+        result.output_dir,
+        psp_name=ctx.psp_name,
+        lens_version=ctx.lens_version_constraint,
+    )
+
     generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for p in result.output_dir.rglob("*.py"):
         ensure_marker(
