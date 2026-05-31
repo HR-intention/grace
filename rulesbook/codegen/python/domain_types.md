@@ -26,6 +26,24 @@ All payment request/response models are unchanged from lens 0.1. See the field r
 in `pitfalls.md` §4a for the exact kwargs — they have `extra="forbid"` and incorrect
 kwargs raise a `ValidationError` at runtime.
 
+### `PaymentWebhookEvent` — exact fields (no more, no less)
+
+```python
+class PaymentWebhookEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    event_type: WebhookEventType        # from PAYMENT_* range
+    psp_event_id: str
+    psp_order_id: str
+    attempt: PaymentAttempt | None = None
+    refund: RefundEvent | None = None
+    raw_payload: dict[str, Any]         # ← `raw_payload` (NOT `raw`, NOT `raw_event`)
+```
+
+**Critical field rules:**
+- `raw_payload` (NOT `raw`, NOT `raw_event`) — the raw PSP payload dict.
+- `occurred_at` does **NOT** exist on `PaymentWebhookEvent` — do not add it.
+- Build: `PaymentWebhookEvent(event_type=…, psp_event_id=…, psp_order_id=…, raw_payload=…)`
+
 ---
 
 ## Mandate types (`lens.domain_types`)
@@ -152,6 +170,33 @@ from lens.enums import (
     FailureClass, FAILURE_CLASS,
 )
 ```
+
+### `PaymentMethod` — locked members (exact set, do NOT invent others)
+
+```python
+class PaymentMethod(StrEnum):
+    CARD          = "CARD"
+    UPI           = "UPI"
+    WALLET        = "WALLET"
+    BANK_TRANSFER = "BANK_TRANSFER"
+    BANK_REDIRECT = "BANK_REDIRECT"
+```
+
+`NET_BANKING`, `EMI`, `PAY_LATER` do **NOT** exist. `mypy --strict` will fail on any unknown
+member access.
+
+**PSP method-group → `PaymentMethod` mapping table:**
+
+| PSP group | Use |
+|---|---|
+| `card`, `credit_card`, `debit_card` | `PaymentMethod.CARD` |
+| `upi` | `PaymentMethod.UPI` |
+| `wallet` | `PaymentMethod.WALLET` |
+| `bank_transfer`, `neft`, `rtgs`, `imps` | `PaymentMethod.BANK_TRANSFER` |
+| `net_banking`, `netbanking` | `PaymentMethod.BANK_REDIRECT` |
+| `emi`, `paylater`, `buy_now_pay_later` | pick closest locked member or omit |
+
+`supported_methods` must return only locked `PaymentMethod` members. Never fabricate a member.
 
 ### Mandate-specific enums (new in lens 0.2.0)
 

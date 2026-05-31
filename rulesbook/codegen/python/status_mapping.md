@@ -170,6 +170,28 @@ a `*_FAILED_FINAL` variant.
 
 ---
 
+## 6. PSP method-group → `PaymentMethod` mapping
+
+`supported_methods` (the `@property` on `<Psp>Orders`) must return a `set[PaymentMethod]`
+containing only **locked** `PaymentMethod` members. Use this table to map PSP group names:
+
+| PSP group | Use |
+|---|---|
+| `card`, `credit_card`, `debit_card` | `PaymentMethod.CARD` |
+| `upi` | `PaymentMethod.UPI` |
+| `wallet` | `PaymentMethod.WALLET` |
+| `bank_transfer`, `neft`, `rtgs`, `imps` | `PaymentMethod.BANK_TRANSFER` |
+| `net_banking`, `netbanking` | `PaymentMethod.BANK_REDIRECT` |
+| `emi`, `paylater`, `buy_now_pay_later` | pick the closest locked member or omit |
+
+**Locked members (exact set):** `CARD`, `UPI`, `WALLET`, `BANK_TRANSFER`, `BANK_REDIRECT`.
+
+`NET_BANKING`, `EMI`, `PAY_LATER` do **NOT** exist as `PaymentMethod` members. `mypy --strict`
+will fail (`error: "type[PaymentMethod]" has no attribute "NET_BANKING"`) on any unknown member
+access. Never invent a `PaymentMethod` member.
+
+---
+
 ## Rules
 
 - **Read the PSP's docs for the full status list.** Don't guess. Every status and event type
@@ -184,3 +206,7 @@ a `*_FAILED_FINAL` variant.
   `failure_code`; Orbit reads the class map.
 - **The shared failure-substring map lives in `core/status.py`** and is consumed by both
   `orders/` and `subscriptions/` domain code. Don't duplicate it.
+- **`net_banking` / `netbanking` → `BANK_REDIRECT`.** Never use a non-existent
+  `PaymentMethod.NET_BANKING` member.
+- **`supported_methods` returns only locked members.** Filter out any PSP group that has no
+  close locked equivalent rather than inventing a new member.

@@ -202,3 +202,12 @@ The composed class has zero leftover abstract methods; it passes `ConnectorFacto
    in-memory constants; no I/O involved.
 8. **`requires_lens = "^0.2"` at module scope in `__init__.py`** and both
    `ConnectorFactory.register(...)` and `ConnectorFactory.register_webhook(...)` must be called.
+9. **Authentication None-guard in `core/auth.py`** — credential optionality:
+   - `config.api_key` is `Maskable[str]` — always present, safe to call `.expose()` directly.
+   - `config.secret_key` is `Maskable[str] | None` — guard with `assert … is not None` or
+     `if … is None: raise ConnectorError(reason=ConnectorErrorReason.AUTHENTICATION_FAILED)`
+     before calling `.expose()`.
+   - `config.webhook_secret` is `Maskable[str] | None` — same None-guard required before
+     `.expose()` in `verify_signature`.
+   Calling `.expose()` on a `None` value raises `AttributeError` at runtime and crashes
+   `mypy --strict` type checking.

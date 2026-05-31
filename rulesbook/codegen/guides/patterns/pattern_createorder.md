@@ -78,11 +78,44 @@ async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse
 
 ## Tests
 
-`tests/test_create_order.py`:
+`tests/integration/connectors/<psp>/orders/test_create_order.py`:
 
 - **Happy path** — `httpx.MockTransport` returns the PSP's success payload; assert the returned `CreateOrderResponse` has the right `psp_order_id`, `payment_link`, and `status == OrderStatus.CREATED`.
 - **4xx path** — transport returns `400` with a PSP error body; assert `ConnectorError(reason=INVALID_REQUEST)` (or the more specific reason).
+- **`payment_link` absent** — transport returns 200 but the link field is missing/null; assert `ConnectorError(reason=INTERNAL)`.
 - (Optional) **Idempotency-key path** — assert the `x-idempotency-key` header is forwarded when the request carries one.
+
+## `payment_link` is REQUIRED (non-None)
+
+`CreateOrderResponse.payment_link` is typed `HttpUrl` — it is **not** `str | None`. If the PSP
+response omits the link or the session URL field, do not return `None`; raise instead:
+
+```python
+payment_link = psp_resp.payment_sessions_url or psp_resp.payment_link
+if not payment_link:
+    raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)
+
+return CreateOrderResponse(
+    psp_order_id=psp_resp.cf_order_id,
+    payment_link=HttpUrl(payment_link),   # ← required, non-optional
+    status=OrderStatus.CREATED,
+    expires_at=psp_resp.order_expiry_time,
+)
+```
+
+```python
+# WRONG — pydantic validation fails on None:
+return CreateOrderResponse(
+    psp_order_id=…,
+    payment_link=None,   # ← ValidationError at runtime
+    …
+)
+```
+
+Add a `payment_link absent` test case: transport returns a body where the link field is missing
+or null; assert `ConnectorError(reason=INTERNAL)`.
+
+---
 
 ## Notes
 

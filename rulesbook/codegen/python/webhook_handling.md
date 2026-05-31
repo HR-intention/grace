@@ -152,6 +152,40 @@ fail the public-surface rubric check.
 
 ---
 
+## Domain event field names — do NOT cross them
+
+`PaymentWebhookEvent` and `MandateWebhookEvent` have **different** raw-payload field names
+and `occurred_at` presence:
+
+| Field | `PaymentWebhookEvent` | `MandateWebhookEvent` |
+|---|---|---|
+| raw dict field | `raw_payload` | `raw` |
+| `occurred_at` | **does NOT exist** | **present** (`datetime`) |
+
+```python
+# CORRECT — PaymentWebhookEvent:
+PaymentWebhookEvent(
+    event_type=…, psp_event_id=…, psp_order_id=…,
+    raw_payload={"key": "val"},   # ← raw_payload
+)
+
+# CORRECT — MandateWebhookEvent:
+MandateWebhookEvent(
+    event_type=…, psp_mandate_ref=…, psp_event_id=…,
+    occurred_at=datetime(…),      # ← occurred_at IS present here
+    raw={"key": "val"},           # ← raw (NOT raw_payload)
+)
+```
+
+```python
+# WRONG — do not mix:
+PaymentWebhookEvent(occurred_at=…)    # ← field does not exist
+PaymentWebhookEvent(raw=…)            # ← use raw_payload instead
+MandateWebhookEvent(raw_payload=…)    # ← use raw instead
+```
+
+---
+
 ## Rules
 
 - **Signature verification is constant-time.** Use `hmac.compare_digest` in `core/auth.py`.
@@ -164,3 +198,6 @@ fail the public-surface rubric check.
 - **Never log raw payload contents directly.** Use structlog with `Maskable` discipline.
 - **Domain parsers receive already-verified bytes.** They do not need to re-verify the
   signature; the `WebhookRouter` already did.
+- **`PaymentWebhookEvent.raw_payload` — not `raw`, not `raw_event`.**
+- **`MandateWebhookEvent.raw` — not `raw_payload`.**
+- **`occurred_at` only on `MandateWebhookEvent`** — do not add it to `PaymentWebhookEvent`.

@@ -179,6 +179,36 @@ will fail the public-surface rubric check.
 - **Malformed JSON in classifier** — ensure safe fallback or INVALID_REQUEST, not an
   unhandled exception.
 
+## Event field names — never cross them
+
+`PaymentWebhookEvent` and `MandateWebhookEvent` have distinct raw-payload field names and
+`occurred_at` presence. Do not mix them:
+
+| | `PaymentWebhookEvent` | `MandateWebhookEvent` |
+|---|---|---|
+| raw dict | `raw_payload` | `raw` |
+| `occurred_at` | **absent** | **present** |
+
+```python
+# orders/webhooks.py — CORRECT:
+return PaymentWebhookEvent(
+    event_type=event_type,
+    psp_event_id=psp_event.event_id,
+    psp_order_id=psp_event.order_id,
+    raw_payload=payload_dict,   # ← raw_payload, never raw
+    # DO NOT add occurred_at — field does not exist on PaymentWebhookEvent
+)
+
+# subscriptions/webhooks.py — CORRECT:
+return MandateWebhookEvent(
+    event_type=event_type,
+    psp_mandate_ref=psp_event.subscription_id,
+    psp_event_id=psp_event.event_id,
+    occurred_at=psp_event.event_time,   # ← occurred_at IS present here
+    raw=payload_dict,                   # ← raw, never raw_payload
+)
+```
+
 ## Pitfalls
 
 - **Do NOT add a `handle_webhook` method to any connector class.** The `MandateConnector` and
@@ -193,3 +223,6 @@ will fail the public-surface rubric check.
   `None` lets the router raise `NOT_SUPPORTED` cleanly.
 - **Signature header casing is PSP-defined.** `headers` is `dict[str, str]` with the casing
   the PSP sends. Do not lowercase keys yourself; look up by the documented exact header name.
+- **`raw_payload` (payment) vs `raw` (mandate)** — never swap them; pydantic `extra="forbid"`
+  will raise a `ValidationError` at construction time.
+- **`occurred_at` only on `MandateWebhookEvent`** — do not add it to `PaymentWebhookEvent`.

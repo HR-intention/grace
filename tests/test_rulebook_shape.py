@@ -10,6 +10,9 @@ _WEBHOOK_TEXT = (R / "webhook_handling.md").read_text()
 _CONNECTOR_ABC_TEXT = (R / "connector_abc.md").read_text()
 _STATUS_MAPPING_TEXT = (R / "status_mapping.md").read_text()
 
+_DOMAIN_TYPES_TEXT = (R / "domain_types.md").read_text()
+_PITFALLS_TEXT = (R / "pitfalls.md").read_text()
+
 P = Path("rulesbook/codegen/guides/patterns")
 
 # Mandate patterns — also read at module scope (before conftest chdir fires).
@@ -39,3 +42,21 @@ def test_mandate_patterns_exist_and_pin_rules() -> None:
     assert "plan" in create.lower() and "payment_methods" in create and "idempotency_key" in create
     manage = _MANAGE_MANDATE_TEXT
     assert "ACTIVATE" in manage and "next_scheduled_time" in manage and "idempotency_key" in manage
+
+
+def test_rulebook_pins_payment_method_members() -> None:
+    sm = _STATUS_MAPPING_TEXT
+    dt = _DOMAIN_TYPES_TEXT
+    assert "BANK_REDIRECT" in (sm + dt)
+    assert "net_banking" in sm.lower()                 # mapping guidance
+
+
+def test_rulebook_distinguishes_webhook_event_fields() -> None:
+    dt = _DOMAIN_TYPES_TEXT
+    assert "raw_payload" in dt and "MandateWebhookEvent" in dt and "PaymentWebhookEvent" in dt
+
+
+def test_pitfalls_cover_generics_and_auth_guard() -> None:
+    p = _PITFALLS_TEXT
+    assert "dict[str, Any]" in p
+    assert "expose" in p and ("Maskable[str] | None" in p or "None-guard" in p.replace("-", " ") or "secret_key" in p)

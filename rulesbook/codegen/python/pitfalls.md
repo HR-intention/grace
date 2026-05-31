@@ -155,6 +155,32 @@ def __init__(self, config: ConnectorConfig) -> None:
     )
 ```
 
+## 5c. `secret_key` and `webhook_secret` are `Maskable[str] | None` — guard before `.expose()`
+
+Only `config.api_key` is guaranteed non-None (`Maskable[str]`). Both `config.secret_key` and
+`config.webhook_secret` are `Maskable[str] | None`. Calling `.expose()` on a `None` value
+raises `AttributeError` at runtime.
+
+```python
+# WRONG — AttributeError if secret_key is None:
+headers["x-client-secret"] = self._config.secret_key.expose()
+```
+
+```python
+# CORRECT — assert or raise before calling .expose():
+assert self._config.secret_key is not None, "secret_key required for this PSP"
+headers["x-client-secret"] = self._config.secret_key.expose()
+
+# Alternative — raise a typed ConnectorError:
+if self._config.webhook_secret is None:
+    raise ConnectorError(reason=ConnectorErrorReason.AUTHENTICATION_FAILED)
+secret = self._config.webhook_secret.expose()
+```
+
+This None-guard must appear in `core/auth.py` before every call to `.expose()` on an optional
+credential. The post-generation self-check grep for `.expose()` in `core/auth.py` must find
+only guarded call sites.
+
 ## 6. Modern typing — deprecated aliases BANNED
 
 The rubric type-correctness dimension requires modern Python 3.11 typing throughout.
@@ -239,6 +265,58 @@ Files starting with the constitution §4 marker are Grace-managed. Editing them 
 breaks the regeneration workflow — `generate --domain X` will overwrite the change. If a
 generated file needs a fix, fix it in the rulebook / prompt / per-PSP spec so that the
 next generation produces the correct output.
+
+## 11. Bare `dict` / `list` fail `mypy --strict`
+
+`mypy --strict` enforces the `type-arg` rule: every builtin generic must be parameterized.
+
+| ✗ Fails mypy | ✓ Correct |
+|---|---|
+| `: dict` | `: dict[str, Any]` |
+| `-> dict` | `-> dict[str, str]` |
+| `: list` | `: list[PaymentAttempt]` |
+| `-> list` | `-> list[str]` |
+
+When the value type is unknown or mixed, use `dict[str, Any]` (import `Any` from `typing`).
+This applies to all function signatures, class fields, and local variable annotations.
+
+## 12. Invented `PaymentMethod` members
+
+The locked `PaymentMethod` enum has exactly five members:
+`CARD`, `UPI`, `WALLET`, `BANK_TRANSFER`, `BANK_REDIRECT`.
+
+`NET_BANKING`, `EMI`, `PAY_LATER` do **NOT** exist. Any access to a non-existent member
+causes `mypy --strict` to fail:
+`error: "type[PaymentMethod]" has no attribute "NET_BANKING"`.
+
+Map PSP groups to the closest locked member (see §12 table in `status_mapping.md`) or omit
+the group from `supported_methods`. Never fabricate a member.
+
+## 13. `raw` vs `raw_payload` / `occurred_at` cross-use
+
+`PaymentWebhookEvent` and `MandateWebhookEvent` have **different** field names for the raw
+payload and **different** presence of `occurred_at`:
+
+| | `PaymentWebhookEvent` | `MandateWebhookEvent` |
+|---|---|---|
+| raw dict | `raw_payload: dict[str, Any]` | `raw: dict[str, Any]` |
+| `occurred_at` | **absent** | **present** (`datetime`) |
+
+```python
+# WRONG — swapped raw field:
+PaymentWebhookEvent(…, raw=payload)           # ← ValidationError: extra field
+MandateWebhookEvent(…, raw_payload=payload)   # ← ValidationError: extra field
+
+# WRONG — occurred_at on payment event:
+PaymentWebhookEvent(…, occurred_at=dt)        # ← ValidationError: extra field
+
+# CORRECT:
+PaymentWebhookEvent(…, raw_payload=payload)
+MandateWebhookEvent(…, occurred_at=dt, raw=payload)
+```
+
+Both models have `extra="forbid"`, so wrong field names raise `ValidationError` at runtime and
+fail pydantic model construction.
 
 ## Final self-check
 

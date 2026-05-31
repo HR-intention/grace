@@ -175,3 +175,8 @@ not by a separate final-failure event. Do **not** invent a custom status or add 
 - **`mandate_status` may not be present** on every event — some PSPs include it only on
   lifecycle events (AUTHORIZED, PAUSED, CANCELLED) but not on debit events. Always handle
   `None` for `mandate_status`.
+- **`raw` (not `raw_payload`) — `MandateWebhookEvent` uses `raw: dict[str, Any]`.** The
+  payment counterpart (`PaymentWebhookEvent`) uses `raw_payload`. Never swap them; pydantic
+  `extra="forbid"` will raise a `ValidationError` at construction time.
+- **`occurred_at` is present on `MandateWebhookEvent`** (it is a required field). The payment
+  counterpart (`PaymentWebhookEvent`) does NOT have `occurred_at`. Do not omit it here.
