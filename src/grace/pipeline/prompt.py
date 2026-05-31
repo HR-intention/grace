@@ -257,11 +257,21 @@ _SELF_CHECK_ORDERS = """\
     Grep(pattern="request\\.order_id", path=<cwd>/orders, glob="connector.py")
         → present in refund / sync_refund flows
 
+  ORDERS PAYMENT_LINK HTTPURL COERCION:
+    Grep(pattern="payment_link=HttpUrl\\(", path=<cwd>/orders, glob="connector.py")
+        → present  (payment_link must be wrapped in HttpUrl(...), never a bare str)
+    Grep(pattern="from pydantic import.*HttpUrl|from pydantic import HttpUrl", path=<cwd>/orders, glob="connector.py")
+        → present  (HttpUrl must be imported from pydantic)
+
   ORDERS TESTS:
     Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests/integration/connectors, glob="*.py", output_mode="content")
         → every match line must end with ") -> None:"
     Grep(pattern="ConnectorConfig\\(.*credentials=|ConnectorConfig\\(.*merchant_id=", path=<cwd>/tests, glob="*.py")
-        → ZERO matches  (ConnectorConfig takes name=, api_key=, secret_key=, webhook_secret=)"""
+        → ZERO matches  (ConnectorConfig takes name=, api_key=, secret_key=, webhook_secret=)
+    Grep(pattern="PSP_UNAVAILABLE", path=<cwd>/tests/integration/connectors, glob="*.py")
+        → present in orders tests  (at least one 5xx/network error-path test must exist)
+    Grep(pattern="AUTHENTICATION_FAILED|RATE_LIMITED|ORDER_NOT_FOUND", path=<cwd>/tests/integration/connectors, glob="*.py")
+        → present  (error-mapping branches must be tested; ≥80% coverage gate requires this)"""
 
 _SELF_CHECK_SUBSCRIPTIONS = """\
   SUBSCRIPTIONS CONNECTOR:
@@ -285,6 +295,20 @@ _SELF_CHECK_SUBSCRIPTIONS = """\
   SUBSCRIPTIONS TESTS:
     Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests/integration/connectors, glob="*.py", output_mode="content")
         → every match line must end with ") -> None:"
+    Grep(pattern="PSP_UNAVAILABLE", path=<cwd>/tests/integration/connectors, glob="*.py")
+        → present in subscriptions tests  (5xx/network error-path tests must exist)
+    Grep(pattern="AUTHENTICATION_FAILED|ORDER_NOT_FOUND|RATE_LIMITED", path=<cwd>/tests/integration/connectors, glob="*.py")
+        → present  (error-mapping branches must be tested; ≥80% coverage gate requires this)
+
+  SUBSCRIPTIONS CORE + CLASSIFY TESTS:
+    Grep(pattern="map_failure_reason|core.status", path=<cwd>/tests, glob="*.py")
+        → present  (core/status.py failure-substring mapper must be tested directly)
+    Grep(pattern="_classify", path=<cwd>/tests, glob="*.py")
+        → present  (the _classify discriminator must be unit-tested: PAYMENT family,
+                    MANDATE family, unknown/unrecognised type → PAYMENT fallback,
+                    malformed JSON → PAYMENT fallback)
+    Grep(pattern="map_subscription_status|map_debit_status", path=<cwd>/tests, glob="*.py")
+        → present  (subscription status_map fallback branches must be tested)
 
   WEBHOOK ROUTER TEST:
     Grep(pattern="test_webhook_router", path=<cwd>/tests/integration/connectors, glob="*.py")
@@ -456,7 +480,20 @@ _LOCKED_DOMAIN_TYPES_ORDERS = """\
 
    `CreateOrderResponse.payment_link` is REQUIRED (HttpUrl, not str | None):
    ✗ Do NOT type it as `payment_link: str | None` — it will fail pydantic validation.
-   If the PSP returns no link, raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)."""
+   If the PSP returns no link, raise ConnectorError(reason=ConnectorErrorReason.INTERNAL).
+
+   CRITICAL — `payment_link` HttpUrl COERCION (mypy --strict):
+   `CreateOrderResponse.payment_link` is typed `HttpUrl`. Passing a bare `str` variable
+   causes: `error: Argument "payment_link" has incompatible type "str"; expected "HttpUrl"`.
+   ✓ Always coerce: `payment_link=HttpUrl(url_string)` — import HttpUrl from pydantic.
+   ✗ `payment_link=url_string`  — bare str fails mypy --strict.
+   ✗ `payment_link=str(psp_resp.payment_link)` — str() makes it worse.
+   Build pattern:
+       from pydantic import HttpUrl
+       link = psp_resp.payment_sessions_url or psp_resp.payment_link
+       if not link:
+           raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)
+       return CreateOrderResponse(payment_link=HttpUrl(link), ...)"""
 
 _LOCKED_DOMAIN_TYPES_SUBSCRIPTIONS = """\
 5. DOMAIN TYPES use the exact field names from domain_types.md:
@@ -544,6 +581,18 @@ _LOCKED_DOMAIN_TYPES_ALL = """\
    `CreateOrderResponse.payment_link` is REQUIRED (HttpUrl, not str | None):
    ✗ Do NOT type it as `payment_link: str | None` — it will fail pydantic validation.
    If the PSP returns no link, raise ConnectorError(reason=ConnectorErrorReason.INTERNAL).
+
+   CRITICAL — `payment_link` HttpUrl COERCION (mypy --strict):
+   `CreateOrderResponse.payment_link` is typed `HttpUrl`. Passing a bare `str` variable
+   causes: `error: Argument "payment_link" has incompatible type "str"; expected "HttpUrl"`.
+   ✓ Always coerce: `payment_link=HttpUrl(url_string)` — import HttpUrl from pydantic.
+   ✗ `payment_link=url_string`  — bare str fails mypy --strict.
+   Build pattern:
+       from pydantic import HttpUrl
+       link = psp_resp.payment_sessions_url or psp_resp.payment_link
+       if not link:
+           raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)
+       return CreateOrderResponse(payment_link=HttpUrl(link), ...)
 
    LOCKED MandateWebhookEvent FIELDS (EXACT — no more, no less):
      event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw

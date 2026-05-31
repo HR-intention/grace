@@ -96,12 +96,15 @@ def _compute_paid_amount(attempts: list[PaymentAttempt]) -> int | None:
 
 ## Tests
 
-`tests/test_sync_payment.py`:
+`tests/integration/connectors/<psp>/orders/test_sync_payment.py`:
 
 - **Single-attempt happy path** — PSP returns one `SUCCESS` attempt; assert `len(response.attempts) == 1`, `response.status == OrderStatus.PAID`, `response.paid_amount` matches.
 - **Multi-attempt path** — PSP returns two attempts (first `FAILED`, then `SUCCESS`); assert the list contains both in PSP-observation order, both statuses correct, `paid_amount` reflects the success amount.
 - **No-attempts path** — PSP returns the order in `CREATED` state with empty payments; assert `response.attempts == []` and `response.status == OrderStatus.CREATED`.
-- (Optional) **`FLAGGED` -> `PENDING`+`FRAUD_REVIEW_PENDING`** — assert the status-map mapping flows through.
+- **5xx path** — endpoint returns `503`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **Unknown order-status path** — order body contains an unmapped `order_status` string; assert does NOT raise and `response.status` is the documented fallback (exercises `map_order_status` warning branch).
+- **404 path** — endpoint returns 404; assert `ConnectorError(reason=ORDER_NOT_FOUND)`.
+- (Optional) **`FLAGGED` → `PENDING`+`FRAUD_REVIEW_PENDING`** — assert the status-map mapping flows through.
 
 ## Notes
 

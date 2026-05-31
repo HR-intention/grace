@@ -69,10 +69,13 @@ async def sync_refund(self, request: SyncRefundRequest) -> SyncRefundResponse:
 
 ## Tests
 
-`tests/test_sync_refund.py`:
+`tests/integration/connectors/<psp>/orders/test_sync_refund.py`:
 
 - **PENDING path** — PSP returns the refund in `pending`; assert `RefundStatus.PENDING` and `refunded_amount is None`.
 - **SUCCESS path** — PSP returns `success` + `refund_amount`; assert `RefundStatus.SUCCESS` and `refunded_amount` matches the original request amount (converted from wire major-units back to minor-units).
+- **Not-found path** — PSP returns `404`; assert `ConnectorError(reason=REFUND_NOT_FOUND)`.
+- **5xx path** — PSP returns `500`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **Malformed-response path** — PSP returns 200 with a body missing a required wire-model field; assert `ConnectorError(reason=INTERNAL)` (exercises the `except ValidationError` branch).
 - (Optional) **FAILED path** — PSP returns `failed` + a reason; assert `RefundStatus.FAILED` and `failure_reason` populated.
 
 ## Notes

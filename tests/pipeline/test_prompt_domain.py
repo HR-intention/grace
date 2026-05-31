@@ -111,7 +111,37 @@ def test_prompt_has_auth_none_guard_rule(tmp_path: Path) -> None:
     assert "expose" in p and ("Maskable[str] | None" in p or "None-guard" in p or "secret_key" in p)
 
 
-def test_orders_prompt_pins_refund_request_fields(tmp_path: Path) -> None:
+def test_orders_prompt_requires_httpurl_coercion(tmp_path: Path) -> None:
+    """The orders prompt must tell the generator to coerce payment_link to HttpUrl."""
+    p = build_prompt(_ctx(tmp_path, "orders"))
+    # The prompt must mention HttpUrl in the context of payment_link coercion
+    assert "HttpUrl" in p
+    # Must explicitly instruct coercion — either HttpUrl(url) or HttpUrl(payment_link)
+    assert "HttpUrl(" in p
+
+
+def test_orders_prompt_requires_error_path_coverage(tmp_path: Path) -> None:
+    """The orders prompt must require error-path test coverage (≥80% gate)."""
+    p = build_prompt(_ctx(tmp_path, "orders"))
+    assert "PSP_UNAVAILABLE" in p
+    assert "_map_http_error" in p or "AUTHENTICATION_FAILED" in p
+
+
+def test_prompt_requires_classify_and_core_tests(tmp_path: Path) -> None:
+    """Prompts for 'all' domain must mention _classify and core module tests."""
+    p = build_prompt(_ctx(tmp_path, "all"))
+    assert "_classify" in p
+    # core/status.py coverage must be mentioned
+    assert "core/status.py" in p or "map_failure_reason" in p
+
+
+def test_orders_prompt_requires_status_map_fallback_tests(tmp_path: Path) -> None:
+    """The orders prompt must require status_map fallback (UNKNOWN) coverage."""
+    p = build_prompt(_ctx(tmp_path, "orders"))
+    assert "UNKNOWN" in p or "fallback" in p.lower() or "status_map" in p
+
+
+def test_orders_prompt_requires_refund_request_fields(tmp_path: Path) -> None:
     p = build_prompt(_ctx(tmp_path, "orders"))
     assert "amount_to_refund" in p                         # RefundRequest field
     assert "psp_order_id" in p                             # named (as NOT on RefundRequest/SyncRefundRequest)

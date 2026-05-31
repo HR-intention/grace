@@ -87,11 +87,14 @@ async def refund(self, request: RefundRequest) -> RefundResponse:
 
 ## Tests
 
-`tests/test_refund.py`:
+`tests/integration/connectors/<psp>/orders/test_refund.py`:
 
 - **Happy path (full refund)** — `amount_to_refund=None`; assert `RefundResponse.status` is `PENDING` (or `SUCCESS` if the PSP reports immediately), and `psp_refund_id` populated.
 - **Happy path (partial refund)** — assert the partial amount echoes correctly through `refunded_amount`.
 - **Already-refunded / over-refund path** — PSP returns 409 or 422; assert `ConnectorError(reason=INVALID_ORDER_STATE)`.
+- **5xx path** — PSP returns `502`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **401 path** — PSP returns `401`; assert `ConnectorError(reason=AUTHENTICATION_FAILED)`.
+- **404 path** — PSP returns `404`; assert `ConnectorError(reason=ORDER_NOT_FOUND)` (or `PAYMENT_NOT_FOUND` if the PSP scopes by payment).
 
 ## Notes
 

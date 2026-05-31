@@ -243,12 +243,146 @@ about that refund". They can differ. Assert against `handler`'s return value, no
 
 ---
 
+## Coverage floor (≥ 80%) requires testing more than happy paths
+
+The rubric awards 0–25 points linearly on line coverage. **The coverage gate is ≥ 80%**.
+Happy-path tests alone consistently land at 60–70%. Reaching ≥ 80% requires exercising the
+error branches, shared `core/` helpers, status-map fallbacks, and the `_classify` discriminator.
+
+### Required error-path tests (per flow)
+
+For **every** flow method in `orders/connector.py` and `subscriptions/connector.py`, write at
+least one test per `ConnectorError` reason the flow can raise:
+
+| HTTP status / condition | Expected `ConnectorErrorReason` |
+|---|---|
+| 401 | `AUTHENTICATION_FAILED` |
+| 403 | `AUTHORIZATION_FAILED` |
+| 404 (order/mandate) | `ORDER_NOT_FOUND` or `REFUND_NOT_FOUND` |
+| 409 / 422 (already-refunded, invalid state) | `INVALID_ORDER_STATE` |
+| 429 | `RATE_LIMITED` |
+| 5xx (any) | `PSP_UNAVAILABLE` |
+| `httpx.ConnectError` / network failure | `PSP_UNAVAILABLE` |
+
+Use `httpx.MockTransport` returning those status codes. The `_map_http_error` helper covers
+most 4xx branches; test them parametrically (minimum: 400, 401, 403, 404, 409, 429, one 5xx).
+
+### Required tests for shared `core/` modules
+
+**`core/status.py` — failure-substring mapper** (typically 24% coverage without direct tests):
+
+The `map_failure_reason` function maps free-text PSP failure messages to
+`(PaymentFailureCode, FailureClass | None)` via ordered substring matching. It must be tested
+directly, not just through connector flows:
+
+```python
+import pytest
+from lens.connectors.<psp>.core.status import map_failure_reason
+from lens.enums import PaymentFailureCode, FailureClass, FAILURE_CLASS
+
+@pytest.mark.parametrize("text,expected_code", [
+    ("payment declined by bank",         PaymentFailureCode.CARD_DECLINED),
+    ("insufficient funds in account",    PaymentFailureCode.INSUFFICIENT_FUNDS),
+    ("mandate revoked by customer",      PaymentFailureCode.MANDATE_REVOKED),
+    ("debit limit exceeded for upi",     PaymentFailureCode.DEBIT_LIMIT_EXCEEDED),
+    ("authentication failed",            PaymentFailureCode.AUTHENTICATION_FAILED),
+])
+def test_map_failure_reason_substrings(text: str, expected_code: PaymentFailureCode) -> None:
+    code, fc = map_failure_reason(text)
+    assert code is expected_code
+    assert fc is FAILURE_CLASS.get(expected_code)
+
+def test_map_failure_reason_unknown_default() -> None:
+    code, fc = map_failure_reason("unrecognised gibberish xyz")
+    assert code is PaymentFailureCode.UNKNOWN
+    assert fc is None
+
+def test_map_failure_reason_none_input() -> None:
+    code, _ = map_failure_reason(None)
+    assert code is PaymentFailureCode.UNKNOWN
+```
+
+**`core/models.py`** — the shared wire models (`CashfreeErrorBody`, `CashfreeWebhookEnvelope`,
+etc.) are used by the connector at runtime. If these models are **not imported and instantiated
+anywhere in the generated tests**, their lines appear as 0% in coverage reports. Ensure at
+least one test instantiates each shared wire model, OR (if the model is genuinely unused by
+any flow) remove it from the package.
+
+### Required tests for `_classify` (compose surface, `webhooks.py`)
+
+`_classify(raw: bytes) -> WebhookFamily` is the webhook-family discriminator. It must be
+tested directly (in addition to the router integration test):
+
+```python
+from lens.connectors.<psp>.webhooks import _classify
+from lens.webhook import WebhookFamily
+
+def test_classify_payment_event() -> None:
+    raw = b'{"type": "PAYMENT_SUCCESS", "data": {}}'
+    assert _classify(raw) is WebhookFamily.PAYMENT
+
+def test_classify_mandate_event() -> None:
+    raw = b'{"type": "SUBSCRIPTION_PAYMENT_SUCCESS", "data": {}}'
+    assert _classify(raw) is WebhookFamily.MANDATE
+
+def test_classify_unknown_event_falls_back_to_payment() -> None:
+    raw = b'{"type": "SOME_UNRECOGNISED_EVENT", "data": {}}'
+    # Unknown types must fall back to PAYMENT (safe default) — not raise
+    assert _classify(raw) is WebhookFamily.PAYMENT
+
+def test_classify_malformed_json_falls_back_to_payment() -> None:
+    raw = b"not json at all"
+    assert _classify(raw) is WebhookFamily.PAYMENT
+```
+
+### Required tests for `status_map.py` fallbacks
+
+Each `status_map.py` (orders and subscriptions) has a fallback branch that fires when the PSP
+sends an unmapped status string. These must be tested:
+
+```python
+from lens.connectors.<psp>.orders.status_map import map_payment_status, map_order_status, map_refund_status
+from lens.enums import PaymentAttemptStatus, PaymentFailureCode, OrderStatus, RefundStatus
+
+def test_map_payment_status_unknown_falls_back() -> None:
+    status, code = map_payment_status("COMPLETELY_UNKNOWN_STATUS")
+    assert status is PaymentAttemptStatus.FAILED
+    assert code is PaymentFailureCode.UNKNOWN
+
+def test_map_order_status_unknown_falls_back() -> None:
+    status = map_order_status("COMPLETELY_UNKNOWN_STATUS")
+    assert status is OrderStatus.FAILED  # or UNKNOWN per the connector's fallback
+
+def test_map_refund_status_unknown_falls_back() -> None:
+    status = map_refund_status("COMPLETELY_UNKNOWN_STATUS")
+    assert status is RefundStatus.FAILED  # or PENDING per the connector's fallback
+```
+
+Similarly for `subscriptions/status_map.py`:
+
+```python
+from lens.connectors.<psp>.subscriptions.status_map import map_subscription_status, map_debit_status
+from lens.enums import MandateStatus, MandateDebitStatus
+
+def test_map_subscription_status_unknown_falls_back() -> None:
+    status = map_subscription_status("COMPLETELY_UNKNOWN_STATUS")
+    assert status is MandateStatus.FAILED  # or the documented fallback
+
+def test_map_debit_status_unknown_falls_back() -> None:
+    status = map_debit_status("COMPLETELY_UNKNOWN_STATUS")
+    assert status is MandateDebitStatus.FAILED
+```
+
+---
+
 ## Coverage discipline
 
 - `status_map.py` per domain: one parametrized test per map entry + the `UNKNOWN`/fallback
   branch.
 - `core/auth.py`: `verify_signature` direct unit test (correct → `True`, tampered → `False`,
   missing headers → `False`).
+- `core/status.py`: direct tests of `map_failure_reason` — representative substrings → expected
+  `(PaymentFailureCode, FailureClass)` + `UNKNOWN` default for no-match + `None` input.
 - Every `except` branch, every `if status == X:` in `_map_http_error`, every fallback path
   in `_map_*` helpers must have at least one test exercising it.
 - Test functions and all helpers need `-> None` (or appropriate return type) annotations for

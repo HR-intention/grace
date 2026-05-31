@@ -123,20 +123,20 @@ async def _manage(
 
 ## Required tests
 
-`tests/integration/connectors/<psp>/subscriptions/test_manage_mandate.py`:
+`tests/integration/connectors/<psp>/subscriptions/test_cancel_subscription.py`,
+`test_pause_subscription.py`, `test_resume_subscription.py`:
 
-- **Cancel — happy path** — mock returns a `CANCELLED` subscription status; assert
-  `ManageMandateResponse.status == MandateStatus.CANCELLED`.
-- **Pause — happy path** — assert `status == MandateStatus.PAUSED`.
-- **Resume — happy path (with `effective_at`)** — action body must contain `ACTIVATE` and
-  `next_scheduled_time`; assert `status == MandateStatus.ACTIVE`.
-- **Resume — `effective_at` is None** — omit `next_scheduled_time`; PSP should still accept
-  the ACTIVATE call.
-- **Idempotency-key forwarding** — assert the PSP's idempotency header is present for all
-  three actions.
+Each file needs:
+- **Happy path** — mock returns the expected post-operation `MandateStatus` (CANCELLED/PAUSED/ACTIVE); assert `ManageMandateResponse.status` is that status.
+- **Idempotency-key forwarding** — assert the PSP's idempotency header is present in the outbound request.
+- **5xx path** — transport returns `503`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 - **404 path** — transport returns 404; assert `ConnectorError(reason=ORDER_NOT_FOUND)`.
-- **Invalid state** — transport returns 422 (e.g. cancel already cancelled); assert
-  `ConnectorError(reason=INVALID_ORDER_STATE)`.
+- **401 path** — transport returns 401; assert `ConnectorError(reason=AUTHENTICATION_FAILED)`.
+- **Invalid state** — transport returns 422 (e.g. cancel already cancelled); assert `ConnectorError(reason=INVALID_ORDER_STATE)`.
+
+`test_resume_subscription.py` additionally:
+- **`effective_at` forwarding** — action body must contain `ACTIVATE` and `next_scheduled_time` when `effective_at` is set.
+- **`effective_at` is None** — omit `next_scheduled_time`; PSP should still accept the ACTIVATE call.
 
 ## Pitfalls
 

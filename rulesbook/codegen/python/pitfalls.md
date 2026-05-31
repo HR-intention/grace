@@ -332,6 +332,46 @@ causes `mypy --strict` to fail:
 Map PSP groups to the closest locked member (see §12 table in `status_mapping.md`) or omit
 the group from `supported_methods`. Never fabricate a member.
 
+## 13a. `payment_link` must be `HttpUrl`, not a bare `str`
+
+`CreateOrderResponse.payment_link` is typed `HttpUrl` (pydantic). Passing a bare Python `str`
+causes mypy `--strict` to fail:
+
+```
+error: Argument "payment_link" to "CreateOrderResponse" has incompatible type "str"; expected "HttpUrl"
+```
+
+```python
+# WRONG — bare str → mypy error + pydantic coercion depends on model Config:
+payment_link = f"https://sandbox.cashfree.com/pg/orders/sessions/{session_id}"
+return CreateOrderResponse(
+    psp_order_id=…,
+    payment_link=payment_link,   # ← str, not HttpUrl → mypy strict error
+    …
+)
+```
+
+```python
+# CORRECT — coerce with HttpUrl(url) before passing:
+from pydantic import HttpUrl
+
+payment_link_url = HttpUrl(
+    f"https://sandbox.cashfree.com/pg/orders/sessions/{session_id}"
+)
+return CreateOrderResponse(
+    psp_order_id=…,
+    payment_link=payment_link_url,   # ← HttpUrl ✓
+    …
+)
+```
+
+The self-check grep for `payment_link=<bare-str-var>` (a plain identifier without `HttpUrl(`)
+is:
+```
+Grep(pattern="payment_link=[a-z_]+[^)]", path=<cwd>/orders, glob="connector.py")
+    → ZERO matches  (every payment_link= assignment must be wrapped in HttpUrl(...))
+```
+
 ## 13. `raw` vs `raw_payload` / `occurred_at` cross-use
 
 `PaymentWebhookEvent` and `MandateWebhookEvent` have **different** field names for the raw

@@ -119,6 +119,11 @@ def _to_debit_outcome(
   non-None `PaymentFailureCode`.
 - **No debit yet** — new mandate with no payments; assert `last_debit is None`.
 - **404 path** — transport returns 404; assert `ConnectorError(reason=ORDER_NOT_FOUND)`.
+- **5xx path** — transport returns `503`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **401 path** — transport returns 401; assert `ConnectorError(reason=AUTHENTICATION_FAILED)`.
+- **Unknown subscription-status fallback** — PSP body has an unmapped `subscription_status`
+  string; assert does NOT raise and `response.status` is the documented fallback (exercises the
+  `map_subscription_status` warning branch).
 
 ## Pitfalls
 

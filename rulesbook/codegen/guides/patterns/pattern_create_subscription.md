@@ -153,7 +153,10 @@ def _build_approval_handle(psp_resp: <Psp>CreateSubscriptionResponse) -> Approva
   outbound request and equals `request.idempotency_key`.
 - **PSP 400 (validation error)** — transport returns 400; assert
   `ConnectorError(reason=INVALID_REQUEST)`.
+- **PSP 401** — transport returns 401; assert `ConnectorError(reason=AUTHENTICATION_FAILED)`.
+- **PSP 429** — transport returns 429; assert `ConnectorError(reason=RATE_LIMITED)`.
 - **PSP 5xx** — transport returns 503; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **Network error** — `MockTransport` raises `httpx.ConnectError`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 
 ## Pitfalls
 
