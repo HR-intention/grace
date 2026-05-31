@@ -109,9 +109,12 @@ def test_introspect_extracts_locked_surface(tmp_path: Path) -> None:
     s = introspect_connector(pkg)
     assert s.psp_name == "demo"
     assert s.class_name == "Demo"
+    # handle_webhook is no longer in LOCKED_FLOWS (webhook handling lives in
+    # the webhook layer, not the capability interface).
     assert sorted(s.flows) == sorted(
-        ["create_order", "sync_payment", "refund", "sync_refund", "handle_webhook"]
+        ["create_order", "sync_payment", "refund", "sync_refund"]
     )
+    assert "handle_webhook" not in s.flows
     assert sorted(s.supported_methods) == ["CARD", "UPI"]
     assert s.base_url == "https://api.example.com/demo"
     assert sorted(s.psp_status_terms) == ["FAILED", "SUCCESS", "USER_DROPPED"]
@@ -138,8 +141,12 @@ def test_render_llms_txt_lists_each_connector(tmp_path: Path) -> None:
     assert "connector_id: demo" in out
     assert "## Other" in out
     assert "payment_methods: CARD, UPI" in out
-    # Flow order matches LOCKED_FLOWS, comma-separated.
-    assert "create_order, sync_payment, refund, sync_refund, handle_webhook" in out
+    # Flow order matches LOCKED_FLOWS (handle_webhook dropped in T16).
+    assert "flows: create_order, sync_payment, refund, sync_refund" in out
+    # handle_webhook must NOT appear in any connector's flows: line.
+    for line in out.splitlines():
+        if line.startswith("flows:"):
+            assert "handle_webhook" not in line, f"handle_webhook in flows line: {line}"
 
 
 def test_render_connector_md_includes_quickfacts(tmp_path: Path) -> None:
