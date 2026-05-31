@@ -90,3 +90,22 @@ def test_all_prompt_has_both_domains(tmp_path: Path) -> None:
     # Both capability imports must appear
     assert "from lens.payments_connector import PaymentsConnector" in p
     assert "from lens.mandate_connector import MandateConnector" in p
+
+
+def test_orders_prompt_pins_payment_method_members_and_event_fields(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "orders"))
+    assert "BANK_REDIRECT" in p and "BANK_TRANSFER" in p     # locked members named
+    assert "NET_BANKING" in p                                # named as INVALID / do-not-invent
+    assert "raw_payload" in p                                # PaymentWebhookEvent field
+    assert "occurred_at" in p                                # named (as NOT on PaymentWebhookEvent)
+    assert "dict[str, Any]" in p                             # parameterize builtins
+
+
+def test_subscriptions_prompt_pins_mandate_event_fields(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "subscriptions"))
+    assert "MandateWebhookEvent" in p and "occurred_at" in p and "dict[str, Any]" in p
+
+
+def test_prompt_has_auth_none_guard_rule(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "orders"))
+    assert "expose" in p and ("Maskable[str] | None" in p or "None-guard" in p or "secret_key" in p)

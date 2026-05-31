@@ -394,7 +394,29 @@ _LOCKED_DOMAIN_TYPES_ORDERS = """\
    - RefundResponse:          psp_refund_id, status, refunded_amount (int)
    - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int), failure_reason
    - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount), failure_code,
-                              failure_reason, attempted_at (required, non-optional), raw"""
+                              failure_reason, attempted_at (required, non-optional), raw
+
+   LOCKED PaymentMethod MEMBERS — EXACT SET (do NOT invent others):
+     PaymentMethod.CARD, PaymentMethod.UPI, PaymentMethod.WALLET,
+     PaymentMethod.BANK_TRANSFER, PaymentMethod.BANK_REDIRECT
+   ✗ NET_BANKING, EMI, PAY_LATER do NOT exist as PaymentMethod members.
+   When mapping PSP method groups to PaymentMethod:
+     net_banking / netbanking → BANK_REDIRECT
+     wallet                  → WALLET
+     card / credit_card / debit_card → CARD
+     upi                     → UPI
+   For unmapped groups (emi, paylater, …): pick the closest locked member or omit.
+   NEVER invent a PaymentMethod member — mypy --strict will fail on unknown enum access.
+
+   LOCKED PaymentWebhookEvent FIELDS (EXACT — no more, no less):
+     event_type, psp_event_id, psp_order_id, attempt, refund, raw_payload
+   ✗ `occurred_at` does NOT exist on PaymentWebhookEvent — do NOT add it.
+   ✗ The raw payload field is `raw_payload` (dict[str, Any]) — NOT `raw` and NOT `raw_event`.
+   Build: PaymentWebhookEvent(event_type=…, psp_event_id=…, psp_order_id=…, raw_payload=…)
+
+   `CreateOrderResponse.payment_link` is REQUIRED (HttpUrl, not str | None):
+   ✗ Do NOT type it as `payment_link: str | None` — it will fail pydantic validation.
+   If the PSP returns no link, raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)."""
 
 _LOCKED_DOMAIN_TYPES_SUBSCRIPTIONS = """\
 5. DOMAIN TYPES use the exact field names from domain_types.md:
@@ -404,9 +426,14 @@ _LOCKED_DOMAIN_TYPES_SUBSCRIPTIONS = """\
    - `request.merchant_id: str`
 
    Response fields are locked (no invented extras):
-   - CreateSubscriptionResponse: psp_subscription_id, psp_mandate_id, status, payment_link
-   - SyncSubscriptionResponse:   psp_subscription_id, psp_mandate_id, status, mandate_status,
-                                 next_debit_at"""
+   - CreateSubscriptionResponse: psp_mandate_ref, status, approval, raw
+   - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw
+
+   LOCKED MandateWebhookEvent FIELDS (EXACT — no more, no less):
+     event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw
+   ✓ `occurred_at` IS present on MandateWebhookEvent (unlike PaymentWebhookEvent).
+   ✓ The raw payload field is `raw` (dict[str, Any]) — NOT `raw_payload`.
+   Build: MandateWebhookEvent(event_type=…, psp_mandate_ref=…, psp_event_id=…, occurred_at=…, raw=…)"""
 
 _LOCKED_DOMAIN_TYPES_ALL = """\
 5. DOMAIN TYPES use the exact field names from domain_types.md:
@@ -425,9 +452,36 @@ _LOCKED_DOMAIN_TYPES_ALL = """\
    - SyncRefundResponse:      psp_refund_id, status, refunded_amount (int), failure_reason
    - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount), failure_code,
                               failure_reason, attempted_at (required, non-optional), raw
-   - CreateSubscriptionResponse: psp_subscription_id, psp_mandate_id, status, payment_link
-   - SyncSubscriptionResponse:   psp_subscription_id, psp_mandate_id, status, mandate_status,
-                                 next_debit_at"""
+   - CreateSubscriptionResponse: psp_mandate_ref, status, approval, raw
+   - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw
+
+   LOCKED PaymentMethod MEMBERS — EXACT SET (do NOT invent others):
+     PaymentMethod.CARD, PaymentMethod.UPI, PaymentMethod.WALLET,
+     PaymentMethod.BANK_TRANSFER, PaymentMethod.BANK_REDIRECT
+   ✗ NET_BANKING, EMI, PAY_LATER do NOT exist as PaymentMethod members.
+   When mapping PSP method groups to PaymentMethod:
+     net_banking / netbanking → BANK_REDIRECT
+     wallet                  → WALLET
+     card / credit_card / debit_card → CARD
+     upi                     → UPI
+   For unmapped groups (emi, paylater, …): pick the closest locked member or omit.
+   NEVER invent a PaymentMethod member — mypy --strict will fail on unknown enum access.
+
+   LOCKED PaymentWebhookEvent FIELDS (EXACT — no more, no less):
+     event_type, psp_event_id, psp_order_id, attempt, refund, raw_payload
+   ✗ `occurred_at` does NOT exist on PaymentWebhookEvent — do NOT add it.
+   ✗ The raw payload field is `raw_payload` (dict[str, Any]) — NOT `raw` and NOT `raw_event`.
+   Build: PaymentWebhookEvent(event_type=…, psp_event_id=…, psp_order_id=…, raw_payload=…)
+
+   `CreateOrderResponse.payment_link` is REQUIRED (HttpUrl, not str | None):
+   ✗ Do NOT type it as `payment_link: str | None` — it will fail pydantic validation.
+   If the PSP returns no link, raise ConnectorError(reason=ConnectorErrorReason.INTERNAL).
+
+   LOCKED MandateWebhookEvent FIELDS (EXACT — no more, no less):
+     event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw
+   ✓ `occurred_at` IS present on MandateWebhookEvent (unlike PaymentWebhookEvent).
+   ✓ The raw payload field is `raw` (dict[str, Any]) — NOT `raw_payload`.
+   Build: MandateWebhookEvent(event_type=…, psp_mandate_ref=…, psp_event_id=…, occurred_at=…, raw=…)"""
 
 
 def _locked_hierarchy_for_domain(domain: str) -> str:
@@ -539,6 +593,38 @@ _POST_CHECK_TYPING = """\
     These are ALLOWED and should be used when needed:
         Callable, Mapping, Any, Literal, Iterable (from typing)
         dict, list, set, tuple, frozenset (built-in generics, Python 3.10+)
+
+  PARAMETERIZED BUILTINS — mypy --strict requires type arguments:
+    Grep(pattern=": dict[^[]|->\\s*dict[^[]|: list[^[]|->\\s*list[^[]", path=<cwd>, glob="*.py")
+        → ZERO matches
+        ✗ `some_param: dict` — bare `dict` fails mypy --strict with `type-arg` error.
+        ✓ `some_param: dict[str, Any]`  or  `some_param: dict[str, str]`
+        ✗ `some_param: list` — bare `list` fails mypy --strict.
+        ✓ `some_param: list[str]`  or  `some_param: list[PaymentAttempt]`
+    When the value type is unknown: use `dict[str, Any]` (import Any from typing).
+
+  AUTHENTICATION None-GUARD — `secret_key` and `webhook_secret` are optional:
+    Only `config.api_key` (Maskable[str]) is guaranteed non-None.
+    `config.secret_key` and `config.webhook_secret` are `Maskable[str] | None`.
+    Grep(pattern="\\.expose()", path=<cwd>/core, glob="auth.py")
+        → every `.expose()` call on secret_key / webhook_secret must be preceded
+          by a None-check (assert / `if … is None: raise ConnectorError(…)`).
+    ✗ `config.secret_key.expose()` without a None-guard raises AttributeError at runtime.
+    ✓ `assert config.secret_key is not None, "secret_key required"`
+       then `config.secret_key.expose()`
+    ✓ `if config.webhook_secret is None: raise ConnectorError(reason=…AUTHENTICATION_FAILED)`
+
+  INVALID PaymentMethod MEMBERS:
+    Grep(pattern="PaymentMethod\\.(NET_BANKING|EMI|PAY_LATER|NETBANKING|CASH|QR)", path=<cwd>, glob="*.py")
+        → ZERO matches  (these members do NOT exist in the locked PaymentMethod enum)
+
+  PAYMENTWEBHOOKEVENT FIELD CROSS-CHECK:
+    Grep(pattern="PaymentWebhookEvent(.*occurred_at", path=<cwd>, glob="*.py")
+        → ZERO matches  (PaymentWebhookEvent has NO occurred_at field)
+    Grep(pattern="PaymentWebhookEvent(.*\\braw=", path=<cwd>, glob="*.py")
+        → ZERO matches  (the field is raw_payload, not raw)
+    Grep(pattern="raw_payload", path=<cwd>/orders, glob="webhooks.py")
+        → present  (must use raw_payload when building PaymentWebhookEvent)
 
   If ANY check above has a non-empty match (when it should be ZERO) or a
   missing match (when it should be present), fix it before writing the
