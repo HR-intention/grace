@@ -48,6 +48,13 @@ def _scaffold_full_pkg(out: Path) -> None:
     base.py + auth.py + status.py + models.py; orders/ and subscriptions/
     each with connector.py / status_map.py / webhooks.py.  All files carry
     the §4 marker.
+
+    Updated for T14:
+    - core/auth.py carries Maskable (relocated from root auth.py).
+    - root webhooks.py carries WEBHOOK_SIGNATURE_FAILED + build_webhook_handlers.
+    - orders/status_map.py references PaymentAttemptStatus + PaymentFailureCode.
+    - subscriptions/status_map.py references MandateStatus + WebhookEventType.
+    - Root auth.py interim shim removed (pii scorer now reads core/auth.py).
     """
     # --- root files ---
     out.mkdir(parents=True, exist_ok=True)
@@ -72,26 +79,17 @@ def _scaffold_full_pkg(out: Path) -> None:
         + "from .orders.connector import DemoOrders\n"
         + "from .subscriptions.connector import DemoSubscriptions\n"
         + "class DemoConnector(DemoOrders, DemoSubscriptions):\n"
-        + "    # Error: WEBHOOK_SIGNATURE_FAILED raised by WebhookHandlers.verify\n"
         + "    pass\n"
     )
 
+    # Root webhooks.py: build_webhook_handlers + WEBHOOK_SIGNATURE_FAILED reference
+    # (error-handling scorer v2 checks this file for the signature-failure pattern).
     webhooks_py = out / "webhooks.py"
     _write_marker(webhooks_py)
     webhooks_py.write_text(
         webhooks_py.read_text()
+        + "from lens.common import WEBHOOK_SIGNATURE_FAILED, ConnectorError\n"
         + "def build_webhook_handlers(config: object) -> object: ...\n"
-    )
-
-    # Root auth.py: satisfies the T13-era pii_discipline scorer which looks at
-    # `output_dir/auth.py`. T14 will update _score_pii_discipline to look at
-    # core/auth.py instead.
-    auth_py = out / "auth.py"
-    _write_marker(auth_py)
-    auth_py.write_text(
-        auth_py.read_text()
-        + "from lens.common import Maskable\n"
-        + "# See core/auth.py for actual implementation.\n"
     )
 
     # --- core/ ---
@@ -110,7 +108,8 @@ def _scaffold_full_pkg(out: Path) -> None:
             "    def base_url(self) -> str: return 'https://api.example.com'\n"
             "    async def close(self) -> None: ...\n",
         ),
-        ("auth.py", "from lens.common import Maskable\ndef sign(s: Maskable[str]) -> str: ...\n"),
+        # core/auth.py carries Maskable credentials (pii scorer reads this location).
+        ("auth.py", "from lens.common import Maskable\nclass DemoCreds:\n    api_key: Maskable[str]\n"),
         ("status.py", ""),
         ("models.py", ""),
     ]:
@@ -137,7 +136,13 @@ def _scaffold_full_pkg(out: Path) -> None:
             "    async def refund(self, r): ...\n"
             "    async def sync_refund(self, r): ...\n",
         ),
-        ("status_map.py", "from lens.enums import PaymentAttemptStatus\nSTATUS_MAP = {}\n"),
+        # orders/status_map.py must reference PaymentAttemptStatus + PaymentFailureCode.
+        (
+            "status_map.py",
+            "from lens.enums import PaymentAttemptStatus, PaymentFailureCode\n"
+            "STATUS_MAP: dict[str, PaymentAttemptStatus] = {}\n"
+            "FAILURE_MAP: dict[str, PaymentFailureCode] = {}\n",
+        ),
         ("webhooks.py", ""),
     ]:
         f = orders_dir / name
@@ -168,7 +173,13 @@ def _scaffold_full_pkg(out: Path) -> None:
             "    async def pause_subscription(self, r): ...\n"
             "    async def resume_subscription(self, r): ...\n",
         ),
-        ("status_map.py", ""),
+        # subscriptions/status_map.py must reference MandateStatus + WebhookEventType.
+        (
+            "status_map.py",
+            "from lens.enums import MandateStatus, WebhookEventType\n"
+            "STATUS_MAP: dict[str, MandateStatus] = {}\n"
+            "EVENT_MAP: dict[str, WebhookEventType] = {}\n",
+        ),
         ("webhooks.py", ""),
     ]:
         f = subs_dir / name

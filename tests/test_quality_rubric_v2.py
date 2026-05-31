@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from grace.quality_rubric import resolve_registered_class, composition_findings, _score_public_surface_v2
+from grace.quality_rubric import (
+    resolve_registered_class,
+    composition_findings,
+    _score_public_surface_v2,
+)
 
 FX = Path(__file__).parent / "fixtures" / "connectors"
 
@@ -35,3 +39,29 @@ def test_orders_only_not_penalized_for_missing_mandate() -> None:
 def test_compliant_scores_full_public_surface() -> None:
     dim = _score_public_surface_v2(FX / "compliant")
     assert dim.score == dim.max
+
+
+# ---------------------------------------------------------------------------
+# T14 new tests (Parts 1–4)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_register_webhook_docks_public_surface() -> None:
+    from grace.quality_rubric import _score_public_surface_v2
+    assert _score_public_surface_v2(FX / "missing_register_webhook").score < 20
+
+
+def test_deprecated_typing_alias_flagged() -> None:
+    from grace.quality_rubric import modern_typing_findings
+    assert modern_typing_findings(FX / "uses_optional")
+    assert not modern_typing_findings(FX / "compliant")
+
+
+def test_error_handling_checks_root_webhooks_signature() -> None:
+    from grace.quality_rubric import _score_error_handling_v2
+    assert _score_error_handling_v2(FX / "compliant").score == 20
+
+
+def test_unmapped_subscription_status_docks() -> None:
+    from grace.quality_rubric import _score_public_surface_v2
+    assert _score_public_surface_v2(FX / "unmapped_subscription_status").score < 20

@@ -57,35 +57,6 @@ class RubricReport:
         return json.dumps(self.to_dict(), indent=2)
 
 
-# --- required public surface (per SUBPROJECT_GRACE_CODEGEN.md §3.2 + §5) ---
-REQUIRED_FILES = ["__init__.py", "connector.py", "auth.py", "models.py", "status_map.py"]
-REQUIRED_TEST_LEAVES = [
-    "test_create_order.py",
-    "test_sync_payment.py",
-    "test_refund.py",
-    "test_sync_refund.py",
-    "test_webhook.py",
-]
-"""Leaf filenames (no `tests/` prefix). The directory they live in depends
-on whether `paths.tests_dir` is configured — when unset, tests live at
-`<output_dir>/tests/`; when set, they're relocated to `<tests_dir>/<psp>/`.
-`_score_public_surface` resolves the right root before checking."""
-REQUIRED_FLOW_METHODS = {
-    "create_order",
-    "sync_payment",
-    "refund",
-    "sync_refund",
-    "handle_webhook",
-    "close",
-}
-REQUIRED_PROPERTIES = {
-    "name",
-    "base_url",
-    "supported_methods",
-    "supports_idempotency_key",
-}
-
-
 # ---------------------------------------------------------------------------
 # Capability-interface names that form the "known" leaf set for BFS.
 # ---------------------------------------------------------------------------
@@ -302,17 +273,103 @@ def _summarize_mypy(findings: list[str]) -> str:
     return f"mypy failed: {errors} error(s)" + (f", {notes} note(s)" if notes else "")
 
 
-def _score_type_correctness(mypy_report: MypyReport) -> Dimension:
-    if mypy_report.passed:
-        return Dimension("type_correctness", 20, 20, "mypy --strict clean")
-    findings = _parse_mypy_findings(mypy_report.stdout)
-    return Dimension(
-        name="type_correctness",
-        max=20,
-        score=0,
-        detail=_summarize_mypy(findings),
-        findings=findings,
-    )
+# ---------------------------------------------------------------------------
+# Deprecated typing aliases — Part 3
+# ---------------------------------------------------------------------------
+
+# Aliases that are deprecated in 3.9+ (use built-in generics instead).
+_DEPRECATED_TYPING_ALIASES: frozenset[str] = frozenset(
+    {
+        "Dict",
+        "FrozenSet",
+        "List",
+        "Optional",
+        "Set",
+        "Tuple",
+        "Type",
+    }
+)
+
+# Patterns for: `from typing import ..., Optional, ...`  or  `typing.Optional`
+_DEPRECATED_IMPORT_RE = re.compile(
+    r"\bfrom\s+typing\s+import\b|"
+    r"\bimport\s+typing\b|"
+    r"\btyping\."
+)
+
+
+def modern_typing_findings(pkg: Path) -> list[str]:
+    """Return a list of findings for deprecated ``typing`` aliases used across
+    all ``.py`` files under *pkg*.
+
+    Flags: ``Dict``, ``List``, ``Optional``, ``Set``, ``Tuple``, ``FrozenSet``,
+    ``Type`` (the aliases superseded by built-in generics in Python 3.9+).
+    Allows: ``Callable``, ``Mapping``, ``Any``, ``Literal``, ``Iterable``,
+    ``Sequence``, and any other name from ``typing`` not in the deprecated set.
+
+    Strategy: AST-parse each file; walk ``ImportFrom`` nodes where module is
+    ``"typing"`` and collect alias names that are in ``_DEPRECATED_TYPING_ALIASES``;
+    also walk ``Attribute`` nodes for ``typing.<DeprecatedAlias>``.
+    Falls back gracefully on ``SyntaxError`` (skips the file).
+
+    Returns:
+        A list of human-readable strings such as
+        ``"core/models.py: uses deprecated typing alias Optional"``.
+    """
+    findings: list[str] = []
+    for py_file in pkg.rglob("*.py"):
+        try:
+            text = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):
+            continue
+        rel = py_file.relative_to(pkg)
+        file_aliases: list[str] = []
+        for node in ast.walk(tree):
+            # from typing import Optional, Dict, ...
+            if isinstance(node, ast.ImportFrom) and node.module in ("typing", "typing_extensions"):
+                for alias in node.names:
+                    if alias.name in _DEPRECATED_TYPING_ALIASES:
+                        file_aliases.append(alias.name)
+            # typing.Optional  / typing.Dict  (attribute access)
+            elif isinstance(node, ast.Attribute):
+                value = node.value
+                if isinstance(value, ast.Name) and value.id == "typing" and node.attr in _DEPRECATED_TYPING_ALIASES:
+                    file_aliases.append(node.attr)
+        for found_alias in sorted(set(file_aliases)):
+            findings.append(f"{rel}: uses deprecated typing alias {found_alias}")
+    return findings
+
+
+def _score_type_correctness(mypy_report: MypyReport, pkg: Path | None = None) -> Dimension:
+    """Score type correctness.
+
+    First checks mypy --strict; if that passes, also runs ``modern_typing_findings``
+    on *pkg* (when provided) to catch deprecated aliases that mypy doesn't flag
+    in strict mode.  Either failure docks the score to 0.
+    """
+    if not mypy_report.passed:
+        findings = _parse_mypy_findings(mypy_report.stdout)
+        return Dimension(
+            name="type_correctness",
+            max=20,
+            score=0,
+            detail=_summarize_mypy(findings),
+            findings=findings,
+        )
+
+    if pkg is not None:
+        alias_findings = modern_typing_findings(pkg)
+        if alias_findings:
+            return Dimension(
+                name="type_correctness",
+                max=20,
+                score=0,
+                detail=f"deprecated typing aliases: {alias_findings[0]}",
+                findings=alias_findings,
+            )
+
+    return Dimension("type_correctness", 20, 20, "mypy --strict clean")
 
 
 def _parse_pytest_findings(stdout: str) -> list[str]:
@@ -361,98 +418,8 @@ def _score_coverage(pytest_report: PytestReport) -> Dimension:
     )
 
 
-def _score_public_surface(ctx: GenerationContext, output_dir: Path) -> Dimension:
-    # Imported here (not at module scope) to avoid a circular import: orchestrate
-    # imports the gates module, which imports quality_rubric.
-    from grace.pipeline.orchestrate import relocated_tests_path
-
-    issues: list[str] = []
-    for name in REQUIRED_FILES:
-        if not (output_dir / name).is_file():
-            issues.append(f"missing {name}")
-    # When `paths.tests_dir` is set, tests have been moved to
-    # `<tests_dir>/<psp>/`. The rubric must check the relocated location,
-    # else every relocated run flags 5 missing test files (− 20 score).
-    relocated = relocated_tests_path(ctx)
-    tests_root = relocated if relocated is not None else output_dir / "tests"
-    for leaf in REQUIRED_TEST_LEAVES:
-        if not (tests_root / leaf).is_file():
-            issues.append(f"missing tests/{leaf}")
-
-    connector_py = output_dir / "connector.py"
-    if connector_py.is_file():
-        tree: ast.Module | None
-        try:
-            tree = ast.parse(connector_py.read_text())
-        except SyntaxError as e:
-            issues.append(f"connector.py: parse error {e}")
-            tree = None
-        if tree is not None:
-            class_node = next(
-                (
-                    n
-                    for n in tree.body
-                    if isinstance(n, ast.ClassDef) and n.name.lower() == ctx.psp_name.lower()
-                ),
-                None,
-            )
-            if class_node is None:
-                issues.append(f"connector.py: no class named (case-insensitive) {ctx.psp_name}")
-            else:
-                method_names = {
-                    n.name
-                    for n in class_node.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                }
-                missing = REQUIRED_FLOW_METHODS - method_names
-                if missing:
-                    issues.append(f"connector class missing methods: {sorted(missing)}")
-
-                # Detect missing @property declarations. An abstract Connector
-                # with these missing fails to instantiate at register-time,
-                # so test_coverage collapses to 0 — surface it here instead
-                # of waiting for pytest collection to blow up.
-                property_names: set[str] = set()
-                for member in class_node.body:
-                    if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        for dec in member.decorator_list:
-                            # `@property` is an ast.Name.
-                            if isinstance(dec, ast.Name) and dec.id == "property":
-                                property_names.add(member.name)
-                                break
-                missing_props = REQUIRED_PROPERTIES - property_names
-                if missing_props:
-                    issues.append(
-                        f"connector class missing @property declarations: "
-                        f"{sorted(missing_props)}"
-                    )
-
-    init_py = output_dir / "__init__.py"
-    if init_py.is_file():
-        text = init_py.read_text()
-        if "ConnectorFactory.register" not in text:
-            issues.append("__init__.py: does not call ConnectorFactory.register")
-        if "requires_lens" not in text:
-            issues.append("__init__.py: missing requires_lens")
-
-    status_map_py = output_dir / "status_map.py"
-    if status_map_py.is_file():
-        if "PaymentAttemptStatus" not in status_map_py.read_text():
-            issues.append("status_map.py: does not reference PaymentAttemptStatus")
-
-    if not issues:
-        return Dimension(
-            "public_surface",
-            20,
-            20,
-            "all required files + methods + registration present",
-        )
-    penalty = min(20, 4 * len(issues))
-    return Dimension("public_surface", 20, 20 - penalty, "; ".join(issues[:5]))
-
-
 # ---------------------------------------------------------------------------
-# Domain-modular public-surface scorer (v2) — T13
+# Domain-modular public-surface scorer (v2) — T13/T14
 # ---------------------------------------------------------------------------
 
 # Always-required files for a 0.2.0 domain-modular package.
@@ -497,6 +464,12 @@ _V2_DOMAIN_METHODS: dict[str, list[str]] = {
 
 # The known set of domains (in iteration order — future-proof against new ones).
 _KNOWN_DOMAINS = ("orders", "subscriptions")
+
+# Per-domain required enum references in status_map.py (T14 §4).
+_V2_STATUS_MAP_ENUMS: dict[str, list[str]] = {
+    "orders": ["PaymentAttemptStatus", "PaymentFailureCode"],
+    "subscriptions": ["MandateStatus", "WebhookEventType"],
+}
 
 
 def _build_class_methods_map(pkg: Path) -> dict[str, set[str]]:
@@ -579,6 +552,35 @@ def _check_webhooks_exports(pkg: Path) -> list[str]:
     return []
 
 
+def _check_domain_status_maps(pkg: Path, present_domains: list[str]) -> list[str]:
+    """For each present domain, verify its ``status_map.py`` references the
+    required enums (T14 §4).
+
+    - ``orders/status_map.py`` must reference ``PaymentAttemptStatus`` AND
+      ``PaymentFailureCode``.
+    - ``subscriptions/status_map.py`` must reference ``MandateStatus`` AND
+      ``WebhookEventType``.
+
+    Missing references dock + appear in detail.
+    """
+    issues: list[str] = []
+    for domain in present_domains:
+        required_enums = _V2_STATUS_MAP_ENUMS.get(domain, [])
+        if not required_enums:
+            continue
+        status_map_py = pkg / domain / "status_map.py"
+        if not status_map_py.is_file():
+            # Already caught by domain-file presence check; don't double-report.
+            continue
+        text = status_map_py.read_text(encoding="utf-8", errors="replace")
+        for enum_name in required_enums:
+            if enum_name not in text:
+                issues.append(
+                    f"{domain}/status_map.py: does not reference {enum_name}"
+                )
+    return issues
+
+
 def _score_public_surface_v2(pkg: Path) -> Dimension:
     """Score the public surface of a domain-modular 0.2.0 connector package.
 
@@ -589,6 +591,7 @@ def _score_public_surface_v2(pkg: Path) -> Dimension:
     4.  Per-present-domain required methods (resolved transitively via MRO BFS).
     5.  __init__.py calls both register + register_webhook.
     6.  root webhooks.py exports build_webhook_handlers.
+    7.  Per-present-domain status_map.py references required enums.
 
     Absent domains are NOT penalized (Cross-Cutting C1).
     Score starts at max 20; each issue docks a penalty; clamped ≥ 0.
@@ -642,6 +645,9 @@ def _score_public_surface_v2(pkg: Path) -> Dimension:
     # 6. Root webhooks.py exports build_webhook_handlers.
     issues.extend(_check_webhooks_exports(pkg))
 
+    # 7. Per-domain status_map enum references.
+    issues.extend(_check_domain_status_maps(pkg, present_domains))
+
     if not issues:
         return Dimension(
             "public_surface",
@@ -657,48 +663,127 @@ def _score_public_surface_v2(pkg: Path) -> Dimension:
     return Dimension("public_surface", 20, max(0, 20 - penalty), detail)
 
 
-def _score_error_handling(output_dir: Path) -> Dimension:
+# ---------------------------------------------------------------------------
+# Error-handling scorer v2 — T14 Part 1
+# ---------------------------------------------------------------------------
+
+
+def _score_error_handling_v2(pkg: Path) -> Dimension:
+    """Score error-handling quality for a domain-modular 0.2.0 connector.
+
+    The webhook signature failure now lives in the SHARED webhook layer.
+    Checks:
+    - root ``webhooks.py`` exports ``build_webhook_handlers`` AND references
+      ``WEBHOOK_SIGNATURE_FAILED`` (via the ``verify`` callable) — OR that
+      ``_classify`` / ``WebhookFamily`` + ``WebhookHandlers`` wiring is present.
+    - ``ConnectorError`` is referenced somewhere in the package.
+    - httpx errors are wrapped (any per-domain connector.py using httpx must
+      call ``raise_for_status`` or catch ``HTTPStatusError``).
+
+    Max 20.
+    """
     issues: list[str] = []
-    connector_py = output_dir / "connector.py"
-    if connector_py.is_file():
-        text = connector_py.read_text()
-        if "WEBHOOK_SIGNATURE_FAILED" not in text:
+
+    # Check 1: root webhooks.py has build_webhook_handlers + signature check.
+    webhooks_py = pkg / "webhooks.py"
+    if not webhooks_py.is_file():
+        issues.append("webhooks.py: missing")
+    else:
+        text = webhooks_py.read_text(encoding="utf-8", errors="replace")
+        if "build_webhook_handlers" not in text:
+            issues.append("webhooks.py: does not define/export build_webhook_handlers")
+        # Signature failure check: either WEBHOOK_SIGNATURE_FAILED directly, or
+        # WebhookFamily/_classify/WebhookHandlers wiring (domain-modular pattern).
+        has_sig_check = (
+            "WEBHOOK_SIGNATURE_FAILED" in text
+            or ("WebhookFamily" in text and "_classify" in text)
+            or ("WebhookHandlers" in text and "verify" in text)
+        )
+        if not has_sig_check:
             issues.append(
-                "connector.py: handle_webhook does not raise ConnectorError(WEBHOOK_SIGNATURE_FAILED)"
+                "webhooks.py: no WEBHOOK_SIGNATURE_FAILED reference "
+                "(or WebhookFamily/_classify/WebhookHandlers.verify wiring)"
             )
-        if "ConnectorError" not in text:
-            issues.append("connector.py: no ConnectorError references")
+
+    # Check 2: ConnectorError referenced somewhere in the package.
+    connector_error_found = False
+    for py_file in pkg.rglob("*.py"):
+        try:
+            if "ConnectorError" in py_file.read_text(encoding="utf-8", errors="replace"):
+                connector_error_found = True
+                break
+        except OSError:
+            continue
+    if not connector_error_found:
+        issues.append("package: no ConnectorError references found")
+
+    # Check 3: httpx errors wrapped in any domain connector.py that uses httpx.
+    for domain in _KNOWN_DOMAINS:
+        domain_connector = pkg / domain / "connector.py"
+        if not domain_connector.is_file():
+            continue
+        try:
+            text = domain_connector.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
         if (
             "httpx" in text
             and "raise_for_status" not in text
             and "HTTPStatusError" not in text
         ):
-            issues.append("connector.py: httpx errors not wrapped")
-    else:
-        issues.append("connector.py missing")
+            issues.append(f"{domain}/connector.py: httpx errors not wrapped")
+
+    # Also check root connector.py for httpx usage.
+    root_connector = pkg / "connector.py"
+    if root_connector.is_file():
+        try:
+            text = root_connector.read_text(encoding="utf-8", errors="replace")
+            if (
+                "httpx" in text
+                and "raise_for_status" not in text
+                and "HTTPStatusError" not in text
+            ):
+                issues.append("connector.py: httpx errors not wrapped")
+        except OSError:
+            pass
+
     if not issues:
         return Dimension("error_handling", 20, 20, "ConnectorError + signature check present")
     penalty = min(20, 7 * len(issues))
-    return Dimension("error_handling", 20, 20 - penalty, "; ".join(issues))
+    return Dimension("error_handling", 20, max(0, 20 - penalty), "; ".join(issues))
+
+
+# ---------------------------------------------------------------------------
+# PII discipline scorer — T14 Part 2 (relocated to core/auth.py)
+# ---------------------------------------------------------------------------
 
 
 def _score_pii_discipline(output_dir: Path) -> Dimension:
+    """Score PII discipline for a domain-modular 0.2.0 connector.
+
+    Checks:
+    - ``core/auth.py`` contains ``Maskable`` (relocated from root ``auth.py``).
+    - No secret-named values in log calls across the package.
+    """
     issues: list[str] = []
-    auth_py = output_dir / "auth.py"
-    if auth_py.is_file():
-        text = auth_py.read_text()
+    core_auth_py = output_dir / "core" / "auth.py"
+    if core_auth_py.is_file():
+        text = core_auth_py.read_text(encoding="utf-8", errors="replace")
         if "Maskable" not in text:
-            issues.append("auth.py: credentials not typed Maskable")
+            issues.append("core/auth.py: credentials not typed Maskable")
     else:
-        issues.append("auth.py missing")
+        issues.append("core/auth.py missing")
     forbidden_re = re.compile(r"(structlog|logger|logging)\.\w+\([^)]*\bsecret\b", re.IGNORECASE)
     for p in output_dir.rglob("*.py"):
-        if forbidden_re.search(p.read_text()):
-            issues.append(f"{p.relative_to(output_dir)}: secret in log call")
+        try:
+            if forbidden_re.search(p.read_text(encoding="utf-8", errors="replace")):
+                issues.append(f"{p.relative_to(output_dir)}: secret in log call")
+        except OSError:
+            continue
     if not issues:
         return Dimension("pii_discipline", 10, 10, "Maskable used; no obvious PII in logs")
     penalty = min(10, 4 * len(issues))
-    return Dimension("pii_discipline", 10, 10 - penalty, "; ".join(issues))
+    return Dimension("pii_discipline", 10, max(0, 10 - penalty), "; ".join(issues))
 
 
 def score_rubric(
@@ -711,10 +796,10 @@ def score_rubric(
     return RubricReport(
         dimensions=[
             _score_marker(output_dir),
-            _score_type_correctness(mypy_report),
+            _score_type_correctness(mypy_report, output_dir),
             _score_coverage(pytest_report),
             _score_public_surface_v2(output_dir),
-            _score_error_handling(output_dir),
+            _score_error_handling_v2(output_dir),
             _score_pii_discipline(output_dir),
         ]
     )

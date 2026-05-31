@@ -69,52 +69,82 @@ def test_quality_report_json_exposes_each_gate_decision(tmp_path: Path) -> None:
         source_version="x",
         reports_dir=tmp_path / "_reports",
     )
-    # Scaffold a complete package so the rubric scores high.
+    # Scaffold a complete domain-modular 0.2.0 package so the rubric scores high.
     out = ctx.output_dir
     out.mkdir(parents=True, exist_ok=True)
-    for fname in ["__init__.py", "connector.py", "auth.py", "models.py", "status_map.py"]:
-        f = out / fname
+
+    # --- root files ---
+    init_py = out / "__init__.py"
+    _write_marker(init_py)
+    init_py.write_text(
+        init_py.read_text()
+        + 'requires_lens = "^0.2"\n'
+        + "from .connector import DemoConnector\n"
+        + "from .webhooks import build_webhook_handlers\n"
+        + "from lens.factory import ConnectorFactory\n"
+        + 'ConnectorFactory.register("demo", DemoConnector)\n'
+        + 'ConnectorFactory.register_webhook("demo", build_webhook_handlers)\n'
+    )
+    connector_py = out / "connector.py"
+    _write_marker(connector_py)
+    connector_py.write_text(
+        connector_py.read_text()
+        + "from lens.common import ConnectorError\n"
+        + "from .orders.connector import DemoOrders\n"
+        + "class DemoConnector(DemoOrders):\n    pass\n"
+    )
+    webhooks_py = out / "webhooks.py"
+    _write_marker(webhooks_py)
+    webhooks_py.write_text(
+        webhooks_py.read_text()
+        + "from lens.common import WEBHOOK_SIGNATURE_FAILED, ConnectorError\n"
+        + "def build_webhook_handlers(config: object) -> object: ...\n"
+    )
+
+    # --- core/ ---
+    core_dir = out / "core"
+    core_dir.mkdir()
+    for fname, content in [
+        ("__init__.py", ""),
+        ("base.py",
+         "from lens.connector import Connector\n"
+         "class _DemoBase(Connector):\n"
+         "    def __init__(self, c: object) -> None: ...\n"
+         "    @property\n    def name(self) -> str: return 'demo'\n"
+         "    @property\n    def base_url(self) -> str: return 'x'\n"
+         "    async def close(self) -> None: ...\n"),
+        ("auth.py", "from lens.common import Maskable\nclass Creds:\n    k: Maskable[str]\n"),
+        ("status.py", ""),
+        ("models.py", ""),
+    ]:
+        f = core_dir / fname
         _write_marker(f)
-        if fname == "connector.py":
-            f.write_text(
-                f.read_text()
-                + "from lens.connector import Connector\n"
-                + "from lens.common import ConnectorError, ConnectorErrorReason\n"
-                + "import httpx\n"
-                + "class Demo(Connector):\n"
-                + "    @property\n    def name(self) -> str: return 'demo'\n"
-                + "    @property\n    def base_url(self) -> str: return 'x'\n"
-                + "    @property\n    def supported_methods(self): return set()\n"
-                + "    @property\n    def supports_idempotency_key(self) -> bool: return True\n"
-                + "    async def create_order(self, request): ...\n"
-                + "    async def sync_payment(self, request): ...\n"
-                + "    async def refund(self, request): ...\n"
-                + "    async def sync_refund(self, request): ...\n"
-                + "    async def handle_webhook(self, raw_payload, headers):\n"
-                + "        raise ConnectorError(reason=ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED)\n"
-                + "    async def close(self): ...\n"
-            )
-        elif fname == "__init__.py":
-            f.write_text(
-                f.read_text()
-                + 'requires_lens = "^0.1"\n'
-                + "from .connector import Demo\n"
-                + "from lens.factory import ConnectorFactory\n"
-                + 'ConnectorFactory.register("demo", Demo)\n'
-            )
-        elif fname == "auth.py":
-            f.write_text(f.read_text() + "from lens.common import Maskable\n")
-        elif fname == "status_map.py":
-            f.write_text(f.read_text() + "from lens.enums import PaymentAttemptStatus\n")
-    (out / "tests").mkdir()
-    for t in (
-        "test_create_order.py",
-        "test_sync_payment.py",
-        "test_refund.py",
-        "test_sync_refund.py",
-        "test_webhook.py",
-    ):
-        _write_marker(out / "tests" / t)
+        f.write_text(f.read_text() + content)
+
+    # --- orders/ ---
+    orders_dir = out / "orders"
+    orders_dir.mkdir()
+    for fname, content in [
+        ("__init__.py", ""),
+        ("connector.py",
+         "from lens.payments_connector import PaymentsConnector\n"
+         "from ..core.base import _DemoBase\n"
+         "class DemoOrders(_DemoBase, PaymentsConnector):\n"
+         "    @property\n    def supported_methods(self): return set()\n"
+         "    @property\n    def supports_idempotency_key(self): return True\n"
+         "    async def create_order(self, r): ...\n"
+         "    async def sync_payment(self, r): ...\n"
+         "    async def refund(self, r): ...\n"
+         "    async def sync_refund(self, r): ...\n"),
+        ("status_map.py",
+         "from lens.enums import PaymentAttemptStatus, PaymentFailureCode\n"
+         "STATUS_MAP: dict[str, PaymentAttemptStatus] = {}\n"
+         "FAILURE_MAP: dict[str, PaymentFailureCode] = {}\n"),
+        ("webhooks.py", ""),
+    ]:
+        f = orders_dir / fname
+        _write_marker(f)
+        f.write_text(f.read_text() + content)
 
     # Force the gate path: mypy clean, coverage 55% (below the 80% gate),
     # rubric should still hit ≥60 because the package is structurally sound.
