@@ -157,6 +157,14 @@ def _log_report_paths(reports_dir: Path) -> None:
     """Print the locations of quality_report.json + coverage.json with a
     short tip on the most useful jq invocations. Called from the `finally`
     branch of `generate` so it fires on both success and failure paths.
+
+    When quality_report.json contains a non-empty ``by_domain`` map, also
+    prints a compact per-domain summary table:
+
+        Per-domain:
+          domain         mypy   tests_failed   coverage
+          orders           21             11      75.3%
+          subscriptions     8              0      85.6%
     """
     quality = reports_dir / "quality_report.json"
     coverage = reports_dir / "coverage.json"
@@ -171,6 +179,27 @@ def _log_report_paths(reports_dir: Path) -> None:
             "  inspect:   "
             f"cat {quality} | python -m json.tool"
         )
+        # Print per-domain breakdown table when present.
+        try:
+            report_data: Any = json.loads(quality.read_text())
+            by_domain: Any = report_data.get("by_domain") if isinstance(report_data, dict) else None
+            if isinstance(by_domain, dict) and by_domain:
+                click.echo()
+                click.echo("Per-domain:")
+                header = f"  {'domain':<16} {'mypy':>6}   {'tests_failed':>12}   {'coverage':>8}"
+                click.echo(header)
+                for domain, metrics in sorted(by_domain.items()):
+                    if not isinstance(metrics, dict):
+                        continue
+                    mypy_errors = int(metrics.get("mypy_errors", 0))
+                    tests_failed = int(metrics.get("tests_failed", 0))
+                    coverage_pct = float(metrics.get("coverage_pct", 0.0))
+                    cov_str = f"{coverage_pct:.1f}%"
+                    click.echo(
+                        f"  {domain:<16} {mypy_errors:>6}   {tests_failed:>12}   {cov_str:>8}"
+                    )
+        except (ValueError, OSError, KeyError):
+            pass
 
 
 def _default_docs_dir(psp: str, cfg: "GraceConfig | None" = None) -> Path:
