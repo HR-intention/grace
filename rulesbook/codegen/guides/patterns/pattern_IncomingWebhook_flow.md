@@ -165,7 +165,7 @@ will fail the public-surface rubric check.
 
 ## Required tests
 
-`tests/integration/connectors/<psp>/test_webhook_router.py`:
+`tests/test_webhook_router.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Signed PAYMENT event** — build a signed payload that `_classify` routes to `PAYMENT`;
   call `WebhookRouter.handle`; assert return type is `PaymentWebhookEvent`.

@@ -157,3 +157,25 @@ def test_orders_prompt_requires_refund_request_fields(tmp_path: Path) -> None:
     # int minor-units rule for refunded_amount / paid_amount (not Amount)
     assert "refunded_amount" in p and "paid_amount" in p
     assert "int" in p                                       # int minor-units named
+
+
+def test_prompt_uses_package_local_test_paths(tmp_path: Path) -> None:
+    """Generator must be told to write tests into the package-local tests/ dir.
+
+    Grace's pipeline relocates <output_dir>/tests/ → <tests_dir>/<psp>/ after
+    generation — the generator must NOT write the final relocated path itself.
+    The file-list block must not instruct the generator to create files under
+    tests/integration/connectors/... (the relocation note may warn about that
+    path as an anti-pattern, but the file list itself must be package-local).
+    """
+    p = build_prompt(_ctx(tmp_path, "all"))
+    assert "tests/test_" in p                              # package-local flat layout present
+    # The FILE-LIST block must never list tests/integration/connectors/... as a target.
+    # We check the specific "tests/integration/connectors/<psp>/" path that the generator
+    # would create — the relocation note is allowed to reference it as an anti-pattern.
+    import re
+    # No test file path of the form "tests/integration/connectors/<something>/test_"
+    assert not re.search(r"tests/integration/connectors/\S+/test_", p), (
+        "File list contains a fully-relocated test path — generator should write "
+        "package-local tests/test_*.py instead"
+    )

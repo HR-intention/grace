@@ -18,24 +18,29 @@ _FILE_LIST_ORDERS = """\
   orders/models.py      # payment wire models
   orders/status_map.py  # PSP payment status -> (PaymentAttemptStatus, PaymentFailureCode)
   orders/webhooks.py    # _parse_payment_webhook(raw: bytes) -> PaymentWebhookEvent
-  tests/integration/connectors/<psp>/orders/test_create_order.py
-  tests/integration/connectors/<psp>/orders/test_sync_payment.py
-  tests/integration/connectors/<psp>/orders/test_refund.py
-  tests/integration/connectors/<psp>/orders/test_sync_refund.py"""
+  tests/test_create_order.py
+  tests/test_sync_payment.py
+  tests/test_refund.py
+  tests/test_sync_refund.py"""
 
 _FILE_LIST_SUBSCRIPTIONS = """\
   subscriptions/connector.py   # class <Psp>Subscriptions(_<Psp>Base, MandateConnector)
   subscriptions/models.py      # subscription / plan / mandate wire models
   subscriptions/status_map.py  # PSP subscription_status -> MandateStatus; event -> WebhookEventType
   subscriptions/webhooks.py    # _parse_mandate_webhook(raw: bytes) -> MandateWebhookEvent
-  tests/integration/connectors/<psp>/subscriptions/test_create_subscription.py
-  tests/integration/connectors/<psp>/subscriptions/test_sync_subscription.py
-  tests/integration/connectors/<psp>/subscriptions/test_cancel_subscription.py
-  tests/integration/connectors/<psp>/subscriptions/test_pause_subscription.py
-  tests/integration/connectors/<psp>/subscriptions/test_resume_subscription.py"""
+  tests/test_create_subscription.py
+  tests/test_sync_subscription.py
+  tests/test_manage_mandate.py  # covers cancel_subscription, pause_subscription, resume_subscription
+  tests/test_pause_subscription.py
+  tests/test_resume_subscription.py"""
 
 _FILE_LIST_WEBHOOK_ROUTER_TEST = """\
-  tests/integration/connectors/<psp>/test_webhook_router.py"""
+  tests/test_webhook_router.py"""
+
+# NOTE on test path layout (package-local):
+# Write all tests into the package-local `tests/` directory shown above.
+# Grace's pipeline relocates `<output_dir>/tests/` to the consumer's configured
+# `paths.tests_dir/<psp>/` after generation — do NOT write that final path yourself.
 
 _FILE_LIST_ALL = (
     _FILE_LIST_CORE
@@ -264,13 +269,13 @@ _SELF_CHECK_ORDERS = """\
         → present  (HttpUrl must be imported from pydantic)
 
   ORDERS TESTS:
-    Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests/integration/connectors, glob="*.py", output_mode="content")
+    Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests, glob="*.py", output_mode="content")
         → every match line must end with ") -> None:"
     Grep(pattern="ConnectorConfig\\(.*credentials=|ConnectorConfig\\(.*merchant_id=", path=<cwd>/tests, glob="*.py")
         → ZERO matches  (ConnectorConfig takes name=, api_key=, secret_key=, webhook_secret=)
-    Grep(pattern="PSP_UNAVAILABLE", path=<cwd>/tests/integration/connectors, glob="*.py")
+    Grep(pattern="PSP_UNAVAILABLE", path=<cwd>/tests, glob="*.py")
         → present in orders tests  (at least one 5xx/network error-path test must exist)
-    Grep(pattern="AUTHENTICATION_FAILED|RATE_LIMITED|ORDER_NOT_FOUND", path=<cwd>/tests/integration/connectors, glob="*.py")
+    Grep(pattern="AUTHENTICATION_FAILED|RATE_LIMITED|ORDER_NOT_FOUND", path=<cwd>/tests, glob="*.py")
         → present  (error-mapping branches must be tested; ≥80% coverage gate requires this)"""
 
 _SELF_CHECK_SUBSCRIPTIONS = """\
@@ -293,11 +298,11 @@ _SELF_CHECK_SUBSCRIPTIONS = """\
         → ZERO matches  (class is MandateConnector singular, not MandatesConnector)
 
   SUBSCRIPTIONS TESTS:
-    Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests/integration/connectors, glob="*.py", output_mode="content")
+    Grep(pattern="^(async )?def test_[a-z_]+\\(", path=<cwd>/tests, glob="*.py", output_mode="content")
         → every match line must end with ") -> None:"
-    Grep(pattern="PSP_UNAVAILABLE", path=<cwd>/tests/integration/connectors, glob="*.py")
+    Grep(pattern="PSP_UNAVAILABLE", path=<cwd>/tests, glob="*.py")
         → present in subscriptions tests  (5xx/network error-path tests must exist)
-    Grep(pattern="AUTHENTICATION_FAILED|ORDER_NOT_FOUND|RATE_LIMITED", path=<cwd>/tests/integration/connectors, glob="*.py")
+    Grep(pattern="AUTHENTICATION_FAILED|ORDER_NOT_FOUND|RATE_LIMITED", path=<cwd>/tests, glob="*.py")
         → present  (error-mapping branches must be tested; ≥80% coverage gate requires this)
 
   SUBSCRIPTIONS CORE + CLASSIFY TESTS:
@@ -311,7 +316,7 @@ _SELF_CHECK_SUBSCRIPTIONS = """\
         → present  (subscription status_map fallback branches must be tested)
 
   WEBHOOK ROUTER TEST:
-    Grep(pattern="test_webhook_router", path=<cwd>/tests/integration/connectors, glob="*.py")
+    Grep(pattern="test_webhook_router", path=<cwd>/tests, glob="*.py")
         → present  (cross-domain: exercises both PAYMENT and MANDATE families + tampered sig)"""
 
 
@@ -752,12 +757,27 @@ _POST_CHECK_TYPING = """\
 # Full prompt template
 # ---------------------------------------------------------------------------
 
+_RELOCATION_NOTE = """\
+╔══════════════════════════════════════════════════════════════════════╗
+║ TEST PATH — WRITE PACKAGE-LOCAL tests/ ONLY                           ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Write tests into the package-local `tests/` directory shown in the layout
+above (e.g. `tests/test_<flow>.py`). Grace's pipeline relocates
+`<output_dir>/tests/` to the consumer's configured `paths.tests_dir/<psp>/`
+after generation — do NOT write that final path yourself. If you write
+`tests/integration/connectors/<psp>/…` the relocation will double the path
+and pytest will collect 0 tests (0% coverage)."""
+
+
 PROMPT_TEMPLATE = """\
 You are generating a Python PSP connector for the Orbit Lens (lens 0.2.0).
 
 Target package layout (you will create these files in the current working directory):
 
 {file_list_block}
+
+{relocation_note}
 
 {compose_surface_notice}
 
@@ -883,6 +903,7 @@ def build_prompt(ctx: GenerationContext) -> str:
 
     return PROMPT_TEMPLATE.format(
         file_list_block=_file_list_for_domain(domain),
+        relocation_note=_RELOCATION_NOTE,
         compose_surface_notice=_COMPOSE_SURFACE_NOTICE,
         core_creation_notice=_CORE_CREATION_NOTICE,
         locked_surface=locked_surface,

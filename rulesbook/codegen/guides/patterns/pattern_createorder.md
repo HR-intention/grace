@@ -78,7 +78,7 @@ async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse
 
 ## Tests
 
-`tests/integration/connectors/<psp>/orders/test_create_order.py`:
+`tests/test_create_order.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Happy path** — `httpx.MockTransport` returns the PSP's success payload; assert the returned `CreateOrderResponse` has the right `psp_order_id`, `payment_link`, and `status == OrderStatus.CREATED`.
 - **4xx path** — transport returns `400` with a PSP error body; assert `ConnectorError(reason=INVALID_REQUEST)` (or the more specific reason).

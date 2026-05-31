@@ -143,7 +143,7 @@ not by a separate final-failure event. Do **not** invent a custom status or add 
 
 ## Required tests
 
-`tests/integration/connectors/<psp>/subscriptions/test_mandate_webhook.py`:
+`tests/test_mandate_webhook.py` (package-local; Grace relocates `tests/` after generation):
 
 - **MANDATE_AUTHORIZED event** — build a valid signed fixture; call through
   `WebhookRouter.handle`; assert `event_type == MANDATE_AUTHORIZED` and

@@ -16,23 +16,27 @@ package; the rubric awards 0–25 points linearly.
 
 ## Required test files
 
-Per `file_layout.md`, the test tree is domain-split:
+Per `file_layout.md`, write all tests into the **package-local `tests/` directory**:
 
 ```
-tests/integration/connectors/<psp>/
-  orders/
-    test_create_order.py
-    test_sync_payment.py
-    test_refund.py
-    test_sync_refund.py
-  subscriptions/
-    test_create_subscription.py
-    test_sync_subscription.py
-    test_cancel_subscription.py
-    test_pause_subscription.py
-    test_resume_subscription.py
+tests/
+  test_create_order.py
+  test_sync_payment.py
+  test_refund.py
+  test_sync_refund.py
+  test_create_subscription.py
+  test_sync_subscription.py
+  test_manage_mandate.py       # covers cancel_subscription, pause_subscription, resume_subscription
+  test_pause_subscription.py
+  test_resume_subscription.py
+  test_mandate_webhook.py
   test_webhook_router.py
 ```
+
+> **Relocation note**: Grace's pipeline moves `<output_dir>/tests/` to the consumer's
+> configured `paths.tests_dir/<psp>/` after generation. Do NOT write the final path
+> `tests/integration/connectors/<psp>/…` yourself — that doubles the path and
+> pytest collects 0 tests (0% coverage).
 
 ---
 

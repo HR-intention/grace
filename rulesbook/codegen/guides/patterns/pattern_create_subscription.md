@@ -141,7 +141,7 @@ def _build_approval_handle(psp_resp: <Psp>CreateSubscriptionResponse) -> Approva
 
 ## Required tests
 
-`tests/integration/connectors/<psp>/subscriptions/test_create_subscription.py`:
+`tests/test_create_subscription.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Happy path (REDIRECT rail)** — `httpx.MockTransport` returns a PSP success body with a
   payment link; assert `CreateSubscriptionResponse` has `psp_mandate_ref` populated,

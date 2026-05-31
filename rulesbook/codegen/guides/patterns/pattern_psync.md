@@ -96,7 +96,7 @@ def _compute_paid_amount(attempts: list[PaymentAttempt]) -> int | None:
 
 ## Tests
 
-`tests/integration/connectors/<psp>/orders/test_sync_payment.py`:
+`tests/test_sync_payment.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Single-attempt happy path** — PSP returns one `SUCCESS` attempt; assert `len(response.attempts) == 1`, `response.status == OrderStatus.PAID`, `response.paid_amount` matches.
 - **Multi-attempt path** — PSP returns two attempts (first `FAILED`, then `SUCCESS`); assert the list contains both in PSP-observation order, both statuses correct, `paid_amount` reflects the success amount.

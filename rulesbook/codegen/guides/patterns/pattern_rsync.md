@@ -69,7 +69,7 @@ async def sync_refund(self, request: SyncRefundRequest) -> SyncRefundResponse:
 
 ## Tests
 
-`tests/integration/connectors/<psp>/orders/test_sync_refund.py`:
+`tests/test_sync_refund.py` (package-local; Grace relocates `tests/` after generation):
 
 - **PENDING path** — PSP returns the refund in `pending`; assert `RefundStatus.PENDING` and `refunded_amount is None`.
 - **SUCCESS path** — PSP returns `success` + `refund_amount`; assert `RefundStatus.SUCCESS` and `refunded_amount` matches the original request amount (converted from wire major-units back to minor-units).

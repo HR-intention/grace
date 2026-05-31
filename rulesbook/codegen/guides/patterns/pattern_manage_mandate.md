@@ -123,8 +123,9 @@ async def _manage(
 
 ## Required tests
 
-`tests/integration/connectors/<psp>/subscriptions/test_cancel_subscription.py`,
-`test_pause_subscription.py`, `test_resume_subscription.py`:
+`tests/test_manage_mandate.py` (covers cancel/pause/resume; package-local — Grace relocates
+`tests/` after generation), or separate `tests/test_cancel_subscription.py`,
+`tests/test_pause_subscription.py`, `tests/test_resume_subscription.py`:
 
 Each file needs:
 - **Happy path** — mock returns the expected post-operation `MandateStatus` (CANCELLED/PAUSED/ACTIVE); assert `ManageMandateResponse.status` is that status.

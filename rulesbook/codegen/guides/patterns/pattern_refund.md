@@ -87,7 +87,7 @@ async def refund(self, request: RefundRequest) -> RefundResponse:
 
 ## Tests
 
-`tests/integration/connectors/<psp>/orders/test_refund.py`:
+`tests/test_refund.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Happy path (full refund)** — `amount_to_refund=None`; assert `RefundResponse.status` is `PENDING` (or `SUCCESS` if the PSP reports immediately), and `psp_refund_id` populated.
 - **Happy path (partial refund)** — assert the partial amount echoes correctly through `refunded_amount`.

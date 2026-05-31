@@ -106,7 +106,7 @@ def _to_debit_outcome(
 
 ## Required tests
 
-`tests/integration/connectors/<psp>/subscriptions/test_sync_subscription.py`:
+`tests/test_sync_subscription.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Happy path (ACTIVE, next charge set)** — PSP returns an `ACTIVE` mandate with a next
   debit date; assert `status == MandateStatus.ACTIVE`, `next_charge_at` is a populated
