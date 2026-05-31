@@ -22,8 +22,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+import jinja2
 
 from grace.errors import GraceError, GraceErrorReason
+
+_TEMPLATE_DIR = Path(__file__).parent / "templates"
+_jinja_env = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(str(_TEMPLATE_DIR)),
+    keep_trailing_newline=True,
+    autoescape=False,
+)
 
 
 # Default include-globs applied when the caller doesn't provide --include.
@@ -233,6 +241,24 @@ def derive_filename(url: str, idx: int) -> str:
     return f"{idx:02d}_{flat}.md"
 
 
+def _render_psp_spec_template(*, psp_name: str) -> str:
+    """Render the psp_spec.md.j2 template for the given PSP name."""
+    return _jinja_env.get_template("psp_spec.md.j2").render(psp_name=psp_name)
+
+
+def scaffold_psp_spec(*, psp_name: str, spec_path: Path, force: bool = False) -> bool:
+    """Write a developer-editable connector spec skeleton at ``spec_path``.
+
+    Returns ``True`` if the file was written, ``False`` if it already existed
+    and ``force`` was not set (no-clobber by default).
+    """
+    if spec_path.exists() and not force:
+        return False
+    spec_path.parent.mkdir(parents=True, exist_ok=True)
+    spec_path.write_text(_render_psp_spec_template(psp_name=psp_name))
+    return True
+
+
 def fetch_docs(
     *,
     psp_name: str,
@@ -241,6 +267,7 @@ def fetch_docs(
     include: list[str] | None = None,
     exclude: list[str] | None = None,
     domain: str = "all",
+    force: bool = False,
     client: httpx.Client | None = None,
 ) -> FetchDocsResult:
     """Fetch an llms.txt + its filtered markdown pages into `output_dir`.
@@ -304,6 +331,11 @@ def fetch_docs(
             target = target_dir / fname
             target.write_bytes(resp.content)
             written.append(target)
+        scaffold_psp_spec(
+            psp_name=psp_name,
+            spec_path=output_dir.parent / f"{psp_name}.md",
+            force=force,
+        )
         return FetchDocsResult(
             psp_name=psp_name,
             source=source,

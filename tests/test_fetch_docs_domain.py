@@ -119,6 +119,17 @@ def test_fetch_writes_into_domain_subfolders(tmp_path) -> None:
     )
 
 
+def test_scaffold_created_when_absent_not_clobbered(tmp_path) -> None:
+    from grace.fetch_docs import scaffold_psp_spec
+    spec = tmp_path / "cashfree.md"
+    assert scaffold_psp_spec(psp_name="cashfree", spec_path=spec) is True   # created
+    spec.write_text(spec.read_text() + "\nDEV EDIT\n")
+    assert scaffold_psp_spec(psp_name="cashfree", spec_path=spec) is False  # not clobbered
+    assert "DEV EDIT" in spec.read_text()
+    assert scaffold_psp_spec(psp_name="cashfree", spec_path=spec, force=True) is True  # forced
+    assert "DEV EDIT" not in spec.read_text()
+
+
 def test_explicit_include_exclude_overrides_domain_preset(tmp_path) -> None:
     """Passing include/exclude explicitly bypasses the domain preset entirely.
 

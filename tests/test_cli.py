@@ -113,6 +113,7 @@ def test_fetch_docs_cli_writes_output(monkeypatch: pytest.MonkeyPatch, tmp_path:
         include: object,
         exclude: object,
         domain: object = "all",
+        force: bool = False,
     ) -> object:
         captured["psp_name"] = psp_name
         captured["source"] = source
@@ -435,6 +436,7 @@ def test_fetch_docs_cli_defaults_include_when_unset(
         include: object,
         exclude: object,
         domain: object = "all",
+        force: bool = False,
     ) -> object:
         captured["include"] = include
         captured["exclude"] = exclude

@@ -365,6 +365,12 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
     help="Output directory. Defaults to <repo>/<paths.docs_dir>/<psp>/ "
     "(set via `grace config set paths.docs_dir <path>`).",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite an existing connector_docs/<psp>.md scaffold.",
+)
 def fetch_docs_cmd(
     psp: str,
     source: str,
@@ -372,6 +378,7 @@ def fetch_docs_cmd(
     include: tuple[str, ...],
     exclude: tuple[str, ...],
     output: Path | None,
+    force: bool,
 ) -> None:
     """Fetch a PSP's docs from its llms.txt into connector_docs/<psp>/."""
     cfg = load_config()
@@ -387,6 +394,7 @@ def fetch_docs_cmd(
             domain=domain,
             include=list(include) if include else None,
             exclude=list(exclude) if exclude else None,
+            force=force,
         )
     except GraceError as e:
         raise _click_error_from_grace(e) from e
