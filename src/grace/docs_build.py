@@ -23,10 +23,32 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from grace.errors import GraceError, GraceErrorReason
+from grace.quality_rubric import (
+    _all_methods_in_mro,
+    _build_class_bases_map,
+    _build_class_methods_map,
+    _extract_register_class_name,
+)
 
 
-REQUIRED_FILES = ("__init__.py", "connector.py", "auth.py", "models.py", "status_map.py")
-LOCKED_FLOWS = ("create_order", "sync_payment", "refund", "sync_refund", "handle_webhook")
+REQUIRED_FILES = ("__init__.py", "connector.py", "auth.py", "models.py")
+
+# Capability-keyed locked flows: payment domain + mandate domain.
+# handle_webhook is NOT included — it is handled by the webhook layer, not
+# by the capability interface.
+LOCKED_FLOWS = (
+    # Payment (orders) flows
+    "create_order",
+    "sync_payment",
+    "refund",
+    "sync_refund",
+    # Mandate (subscriptions) lifecycle flows
+    "create_subscription",
+    "sync_subscription",
+    "cancel_subscription",
+    "pause_subscription",
+    "resume_subscription",
+)
 
 
 @dataclass(frozen=True)
@@ -34,14 +56,15 @@ class ConnectorSummary:
     """Static-analysis snapshot of one connector package."""
 
     psp_name: str                          # registry key, lowercase, from ConnectorFactory.register
-    class_name: str                        # PascalCase class name from `class <Foo>(Connector):`
+    class_name: str                        # PascalCase class name resolved via register() call
     pkg_dir: Path                          # absolute path to lens/connectors/<psp>/
-    flows: list[str]                       # subset of LOCKED_FLOWS actually defined
+    flows: list[str]                       # subset of LOCKED_FLOWS actually defined across MRO
     supported_methods: list[str]           # values from the `supported_methods` property
     base_url: str | None                   # literal string returned by `base_url`
-    psp_status_terms: list[str]            # keys of STATUS_MAP in status_map.py
+    psp_status_terms: list[str]            # keys of STATUS_MAP in per-domain status_map.py files
     requires_lens: str | None              # `requires_lens = "..."` from __init__.py
     self_registers: bool                   # whether __init__.py calls ConnectorFactory.register
+    domains: list[str] = field(default_factory=list)  # present capability domains
 
 
 @dataclass(frozen=True)
@@ -109,6 +132,11 @@ def _flows_defined(cls: ast.ClassDef) -> list[str]:
     return [f for f in LOCKED_FLOWS if f in method_names]
 
 
+def _flows_from_mro(mro_methods: set[str]) -> list[str]:
+    """Return the subset of LOCKED_FLOWS present in the full MRO method set."""
+    return [f for f in LOCKED_FLOWS if f in mro_methods]
+
+
 def _property_body(cls: ast.ClassDef, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     for node in cls.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
@@ -155,41 +183,161 @@ def _status_map_keys(status_map_text: str) -> list[str]:
     return deduped
 
 
+_KNOWN_DOMAINS = ("orders", "subscriptions")
+
+
+def _collect_domain_status_terms(pkg_dir: Path) -> list[str]:
+    """Collect status-map keys from per-domain status_map.py files.
+
+    Reads ``<pkg>/<domain>/status_map.py`` for each present domain (orders,
+    subscriptions), falling back to the flat ``status_map.py`` at the
+    package root for legacy connectors.  Results are de-duplicated across
+    all sources while preserving first-seen order.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+
+    def _merge(text: str) -> None:
+        for term in _status_map_keys(text):
+            if term not in seen:
+                seen.add(term)
+                result.append(term)
+
+    # Per-domain files (domain-modular layout).
+    found_domain_map = False
+    for domain in _KNOWN_DOMAINS:
+        domain_sm = pkg_dir / domain / "status_map.py"
+        if domain_sm.is_file():
+            found_domain_map = True
+            _merge(_read_safely(domain_sm))
+
+    # Legacy fallback: flat status_map.py at the package root.
+    if not found_domain_map:
+        _merge(_read_safely(pkg_dir / "status_map.py"))
+
+    return result
+
+
 def introspect_connector(pkg_dir: Path) -> ConnectorSummary:
-    """Return a ConnectorSummary for the connector package at `pkg_dir`."""
+    """Return a ConnectorSummary for the connector package at ``pkg_dir``.
+
+    Resolution strategy (domain-modular layout):
+
+    1. Read ``__init__.py``; extract the class name from the second arg of
+       ``ConnectorFactory.register("<psp>", ClassName)`` via
+       ``_extract_register_class_name`` (from ``grace.quality_rubric``).
+    2. AST-parse every ``*.py`` under ``pkg_dir`` to build the full
+       ``{class_name: [bases]}`` and ``{class_name: {methods}}`` maps.
+    3. BFS over the MRO to collect all method names reachable from the
+       registered class.
+    4. The ``flows`` list is the intersection of those methods with
+       ``LOCKED_FLOWS`` (payment + mandate lifecycle; no ``handle_webhook``).
+
+    Fallback for legacy flat-layout connectors: if no register call exists
+    the old ``class Foo(Connector)`` detection is used so existing tests
+    continue to pass.
+    """
     init_text = _read_safely(pkg_dir / "__init__.py")
     connector_text = _read_safely(pkg_dir / "connector.py")
-    status_map_text = _read_safely(pkg_dir / "status_map.py")
 
     self_registers, registry_name, requires_lens = _init_facts(init_text)
 
-    class_name = "Unknown"
+    class_name: str = "Unknown"
     flows: list[str] = []
     supported_methods: list[str] = []
     base_url: str | None = None
     psp_name_from_class: str | None = None
 
-    try:
-        tree = ast.parse(connector_text)
-    except SyntaxError:
-        tree = None
+    # --- Step 1: Resolve registered class name via __init__.py. ---
+    registered_name = _extract_register_class_name(init_text)
 
-    if tree is not None:
-        cls = _connector_class(tree)
-        if cls is not None:
-            class_name = cls.name
-            flows = _flows_defined(cls)
-            sm_node = _property_body(cls, "supported_methods")
-            if sm_node is not None:
-                supported_methods = _set_literal_strings(sm_node)
-            burl_node = _property_body(cls, "base_url")
-            if burl_node is not None:
-                base_url = _literal_str_returned(burl_node)
-            name_node = _property_body(cls, "name")
-            if name_node is not None:
-                psp_name_from_class = _literal_str_returned(name_node)
+    if registered_name is not None:
+        # --- Steps 2–4: MRO-based resolution. ---
+        class_name = registered_name
+        bases_map = _build_class_bases_map(pkg_dir)
+        methods_map = _build_class_methods_map(pkg_dir)
+        mro_methods = _all_methods_in_mro(registered_name, bases_map, methods_map)
+        flows = _flows_from_mro(mro_methods)
+
+        # Extract supported_methods and base_url from the nearest class in the
+        # MRO that defines the property (search all AST-parsed class bodies).
+        for cls_name, method_set in methods_map.items():
+            if "supported_methods" in method_set and not supported_methods:
+                # Find the class def to extract the literal set.
+                for py_file in pkg_dir.rglob("*.py"):
+                    try:
+                        t = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+                    except (OSError, SyntaxError):
+                        continue
+                    for node in ast.walk(t):
+                        if isinstance(node, ast.ClassDef) and node.name == cls_name:
+                            sm_node = _property_body(node, "supported_methods")
+                            if sm_node is not None:
+                                cands = _set_literal_strings(sm_node)
+                                if cands:
+                                    supported_methods = cands
+                            break
+
+        # base_url: walk all classes in the MRO to find a literal return.
+        for py_file in pkg_dir.rglob("*.py"):
+            if base_url is not None:
+                break
+            try:
+                t = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, SyntaxError):
+                continue
+            for node in ast.walk(t):
+                if isinstance(node, ast.ClassDef):
+                    burl_node = _property_body(node, "base_url")
+                    if burl_node is not None:
+                        candidate = _literal_str_returned(burl_node)
+                        if candidate is not None:
+                            base_url = candidate
+                            break
+
+        # psp_name from `name` property.
+        for py_file in pkg_dir.rglob("*.py"):
+            if psp_name_from_class is not None:
+                break
+            try:
+                t = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+            except (OSError, SyntaxError):
+                continue
+            for node in ast.walk(t):
+                if isinstance(node, ast.ClassDef):
+                    name_node = _property_body(node, "name")
+                    if name_node is not None:
+                        candidate = _literal_str_returned(name_node)
+                        if candidate is not None:
+                            psp_name_from_class = candidate
+                            break
+
+    else:
+        # Fallback: legacy flat-layout connector (class Foo(Connector): ...).
+        try:
+            tree: ast.Module | None = ast.parse(connector_text)
+        except SyntaxError:
+            tree = None
+
+        if tree is not None:
+            cls = _connector_class(tree)
+            if cls is not None:
+                class_name = cls.name
+                flows = _flows_defined(cls)
+                sm_node = _property_body(cls, "supported_methods")
+                if sm_node is not None:
+                    supported_methods = _set_literal_strings(sm_node)
+                burl_node = _property_body(cls, "base_url")
+                if burl_node is not None:
+                    base_url = _literal_str_returned(burl_node)
+                name_node = _property_body(cls, "name")
+                if name_node is not None:
+                    psp_name_from_class = _literal_str_returned(name_node)
 
     psp_name = registry_name or psp_name_from_class or pkg_dir.name
+
+    # Determine present domains.
+    domains = [d for d in _KNOWN_DOMAINS if (pkg_dir / d).is_dir()]
 
     return ConnectorSummary(
         psp_name=psp_name,
@@ -198,9 +346,10 @@ def introspect_connector(pkg_dir: Path) -> ConnectorSummary:
         flows=flows,
         supported_methods=sorted(supported_methods),
         base_url=base_url,
-        psp_status_terms=_status_map_keys(status_map_text),
+        psp_status_terms=_collect_domain_status_terms(pkg_dir),
         requires_lens=requires_lens,
         self_registers=self_registers,
+        domains=domains,
     )
 
 
@@ -254,11 +403,13 @@ def render_llms_txt(connectors: list[ConnectorSummary]) -> str:
         "  1. Build a ConnectorConfig with the PSP's credentials (api_key,",
         "     secret_key, webhook_secret — all Maskable[str]).",
         "  2. Use ConnectorFactory.create(config) to obtain the Connector.",
-        "  3. Call the four flows (async): create_order -> sync_payment ->",
-        "     refund -> sync_refund. Use handle_webhook(raw_payload, headers)",
-        "     for incoming PSP events; close() at shutdown.",
-        "  4. Branch on returned status enums (OrderStatus, PaymentAttemptStatus,",
-        "     RefundStatus) — never PSP-specific strings.",
+        "  3. Payment flows (async): create_order -> sync_payment -> refund ->",
+        "     sync_refund. Mandate flows: create_subscription -> sync_subscription",
+        "     -> cancel_subscription (pause/resume where supported).",
+        "  4. Webhook events are dispatched via ConnectorFactory.register_webhook;",
+        "     call close() at shutdown.",
+        "  5. Branch on returned status enums (OrderStatus, PaymentAttemptStatus,",
+        "     RefundStatus, MandateStatus) — never PSP-specific strings.",
         "",
     ]
     for c in connectors:

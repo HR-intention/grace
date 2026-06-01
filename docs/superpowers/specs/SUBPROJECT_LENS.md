@@ -2,8 +2,8 @@
 
 **Inherits from**: `ORBIT_CONSTITUTION.md`. Conflicts resolve in favor of the constitution.
 **Owner**: TBD per implementing agent.
-**Location**: `/Users/sarthak/PycharmProjects/references/lens/`
-**Status**: v0.4 — Order + PaymentAttempt entity model, simplified statuses, locked failure-code taxonomy.
+**Location**: `/Users/sarthak/PycharmProjects/symplora/sylibs/packages/lens/` — package in the `sylibs` monorepo. Distribution name and import name are both `lens`; published to SyPI.
+**Status**: v0.7 / lens 0.2.1 — `CreateSubscriptionRequest` exposes optional Cashfree authorization-amount fields; connector version gate removed; periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
 
 ---
 
@@ -15,13 +15,15 @@ Lens **takes inspiration from juspay-prism** for the registry pattern and the di
 
 **In scope for v1**
 
-- Four PSP flows tailored to hosted-checkout: `create_order`, `sync_payment`, `refund`, `sync_refund`. Plus webhook handling (`handle_webhook`) and lifecycle (`close`).
+- Four PSP flows tailored to hosted-checkout: `create_order`, `sync_payment`, `refund`, `sync_refund`. Plus lifecycle (`close`). Webhook handling is now the shared `WebhookRouter` (not per-connector `handle_webhook`).
 - Hosted-checkout / session-based PSP integration only (constitution §7).
-- One PSP: Cashfree.
+- One PSP: Cashfree (quarantined pending Grace regeneration against 0.2.0 ABCs).
 - The `PaymentAttempt` domain model + three separate status enums (`OrderStatus`, `PaymentAttemptStatus`, `RefundStatus`) + the locked `PaymentFailureCode` taxonomy.
+- **Phase 3 (periodic subscription mandates):** UPI Autopay + card e-mandate, INR, periodic/PSP-scheduled debit mode. Five lifecycle flows: `create_subscription`, `sync_subscription`, `cancel_subscription`, `pause_subscription`, `resume_subscription`. Lens is stateless; Cashfree owns the debit schedule, retry, and notification. Mandate domain types, enums, `FailureClass`, `FAILURE_CLASS`, `MandatesFacade`, `MandateConnector` capability interface, `WebhookRouter`.
 
-**Out of scope for v1**
+**Out of scope**
 
+- On-demand / merchant-triggered mandate debit (`execute_mandate_debit` / `notify_pre_debit`). Periodic mandates are now in scope; on-demand stays out.
 - Direct-API / server-to-server flows (`authorize` / `capture` / `void` with raw instrument data). Future-scope design lives in `FUTURE_S2S_INTERFACE.md`.
 - A second PSP in production (Razorpay is a Grace-side generation test only).
 - Any HTTP/gRPC server exposing Lens externally.
@@ -34,14 +36,14 @@ Lens **takes inspiration from juspay-prism** for the registry pattern and the di
 
 - **PSP** — Payment Service Provider (Cashfree, Razorpay, Stripe, …).
 - **Order** (a.k.a. PaymentRequest) — *entity 1*. The merchant's intent to receive a payment. Created in Orbit; mirrored to the PSP via `create_order`. One PSP order corresponds to 1 Orbit Order. Owns the `payment_link`, the `allowed_methods`, the TTL.
-- **PaymentAttempt** (a.k.a. Transaction) — *entity 2*. One specific attempt by the payer against an Order. Created when the PSP signals a payment was initiated. One Order can have 0..N PaymentAttempts. Returned in lists from `sync_payment` and individually inside `WebhookEvent`.
+- **PaymentAttempt** (a.k.a. Transaction) — *entity 2*. One specific attempt by the payer against an Order. Created when the PSP signals a payment was initiated. One Order can have 0..N PaymentAttempts. Returned in lists from `sync_payment` and individually inside `PaymentWebhookEvent`.
 - **Refund** — *entity 3*. A merchant-initiated reversal against the successful PaymentAttempt of an Order. Created via `refund`. Status updates arrive via webhook or `sync_refund`.
 - **Flow** — A logical interaction with the PSP. v1 has four flows:
   - **`create_order`** — Tell the PSP to create a hosted-checkout session for this amount and these allowed methods. Returns an `psp_order_id` and a `payment_link`. No PaymentAttempt yet.
   - **`sync_payment`** — Poll the PSP for the order's current state. Returns the overall `OrderStatus` and the list of `PaymentAttempt`s observed so far.
   - **`refund`** — Initiate a refund against the successful PaymentAttempt of an order (full or partial). Returns a `psp_refund_id`.
   - **`sync_refund`** — Poll for refund status.
-- **Webhook (in Lens)** — `Connector.handle_webhook` verifies the PSP's signature on a raw payload and parses it into a `WebhookEvent` carrying a `PaymentAttempt` (for payment-level events) or a `RefundEvent` (for refund-level events). Dedup of webhooks is Orbit's job.
+- **Webhook (in Lens)** — `WebhookRouter.handle(raw_payload, headers)` (obtained via `ConnectorFactory.create_webhook_router(config)`) verifies the PSP's signature once and routes by event family, returning `PaymentWebhookEvent` (for payment/refund events, carrying a `PaymentAttempt` or `RefundEvent`) or `MandateWebhookEvent` (for mandate/subscription events). Dedup of webhooks is Orbit's job.
 - **Hosted Checkout / Session-based** — The integration model where the PSP renders its own page for the payer to enter card/UPI/wallet details. v1 uses only this model.
 - **Idempotency Key** — A client-supplied identifier passed to `create_order` and `refund` so PSP retries don't double-create. Lens passes it through; doesn't store it.
 - **Connector** — A Python class (one per PSP) that implements the `Connector` ABC. Owns its httpx client; translates between our domain types and the PSP's wire-level types.
@@ -65,7 +67,7 @@ Plain-English rules every implementer of Lens follows.
 1. **Stateless library.** No database. No file I/O beyond httpx. No global mutable state except `ConnectorFactory._registry` (write-once at import).
 2. **No HTTP server.** Pure Python library; never opens a listening socket.
 3. **Async everywhere.** Every public method on `PaymentsFacade` and `Connector` is `async def`. CPU work via `asyncio.to_thread`.
-4. **One class per PSP.** Each `Connector` subclass implements all four flow methods + `handle_webhook` + `close`. No per-(PSP × Flow) class splits.
+4. **One class per PSP.** Each PSP class implements at least one capability interface (`PaymentsConnector`, `MandateConnector`, or both) plus `close`. Webhook handling lives in the shared `WebhookRouter`, not the connector. No per-(PSP × Flow) class splits.
 5. **Each Connector owns its httpx client.** Created in `__init__`, closed in `close()`. Configured with timeouts, retries, and a structured-logging event hook. Tests pass `httpx.MockTransport` at construction.
 6. **No business logic in Connectors.** A Connector's job is: take a domain request, build the PSP-shaped HTTP request, call the PSP, parse the response into a domain response, return it. Business decisions (state transitions on Orders, idempotency dedup, ledger updates) belong to Orbit.
 7. **Hosted-checkout only in v1.** Connectors never receive raw card numbers, UPI VPAs, or wallet IDs. `PaymentMethod` is an allow-list constraint passed to the PSP and a value read back; not a per-method request builder.
@@ -75,7 +77,7 @@ Plain-English rules every implementer of Lens follows.
 11. **PII through `Maskable[T]`.** Any secret-bearing field is typed `Maskable[str]`. `expose()` is the only way to read.
 12. **All errors are `ConnectorError`.** PSP-specific exceptions are caught and translated inside the Connector method.
 13. **Idempotency keys pass through, never persist.** Lens forwards the caller-supplied key to the PSP. Dedup is Orbit's job.
-14. **Webhook = verify + parse, nothing else.** `Connector.handle_webhook` verifies the signature, parses the body into a `WebhookEvent` (with `attempt` or `refund` populated), returns it.
+14. **Webhook = verify + parse, nothing else.** `WebhookRouter.handle` verifies the signature once and parses the body into `PaymentWebhookEvent` (with `attempt` or `refund` populated) or `MandateWebhookEvent` (with `mandate_status` and/or `debit` populated), returns it. Webhook handling is not on any connector.
 15. **The `__init__.py` in each `connectors/<psp>/` package self-registers with `ConnectorFactory` on import.**
 16. **Map all PSP-specific outcome terms into the locked `PaymentFailureCode` taxonomy.** PSPs use varying vocabulary (`USER_DROPPED`, `NOT_ATTEMPTED`, `cancelled_by_user`, `payment_did_not_complete`, …). Each Connector translates them to our taxonomy. If no value fits, use `UNKNOWN` and capture the PSP-original in `failure_reason`.
 
@@ -83,27 +85,27 @@ Plain-English rules every implementer of Lens follows.
 
 ## §4. Public interfaces (locked)
 
-### 4.1 `PaymentsFacade`
+### 4.1 Facades
+
+#### `PaymentsFacade`
 
 ```python
 # lens/facade.py
 
 class PaymentsFacade:
-    def __init__(self, connector: Connector): ...
+    def __init__(self, connector: PaymentsConnector): ...
 
     async def create_order(self,  request: CreateOrderRequest)  -> CreateOrderResponse: ...
     async def sync_payment(self,  request: SyncPaymentRequest)  -> SyncPaymentResponse: ...
     async def refund(self,        request: RefundRequest)       -> RefundResponse: ...
     async def sync_refund(self,   request: SyncRefundRequest)   -> SyncRefundResponse: ...
 
-    async def incoming_webhook(
-        self, raw_payload: bytes, headers: dict[str, str]
-    ) -> WebhookEvent: ...
-
     async def close(self) -> None: ...
 ```
 
-Implementation is a thin wrapper around the held `Connector`. Each method:
+`incoming_webhook` has been **removed** from `PaymentsFacade`. Webhook handling is now the shared `WebhookRouter` (§4.5 below). Obtain one via `ConnectorFactory.create_webhook_router(config)`.
+
+Implementation is a thin wrapper around the held `PaymentsConnector`. Each method:
 
 1. Binds `request_id`, `connector_name`, `flow` to structlog context.
 2. Emits a `start` log record.
@@ -112,10 +114,38 @@ Implementation is a thin wrapper around the held `Connector`. Each method:
 5. Emits an `end` log record with `latency_ms` and `outcome`.
 6. Returns the result.
 
-### 4.2 `Connector` ABC
+#### `MandatesFacade`
 
 ```python
-# lens/connector.py
+# lens/mandates_facade.py
+
+class MandatesFacade:
+    def __init__(self, connector: MandateConnector): ...
+
+    # Lifecycle (async) — wraps MandateConnector, same _track pattern as PaymentsFacade
+    async def create_subscription(self,  request: CreateSubscriptionRequest)  -> CreateSubscriptionResponse: ...
+    async def sync_subscription(self,    request: SyncSubscriptionRequest)    -> SyncSubscriptionResponse: ...
+    async def cancel_subscription(self,  request: ManageMandateRequest)       -> ManageMandateResponse: ...
+    async def pause_subscription(self,   request: ManageMandateRequest)       -> ManageMandateResponse: ...
+    async def resume_subscription(self,  request: ManageMandateRequest)       -> ManageMandateResponse: ...
+
+    async def close(self) -> None: ...
+
+    # Introspection pass-throughs (sync — MandateConnector methods are plain, not async)
+    def supported_mandate_rails(self) -> set[MandateRail]: ...
+    def supports_pause(self) -> bool: ...
+    def supported_intervals(self) -> set[MandateIntervalType]: ...
+    def max_mandate_amount(self, rail: MandateRail) -> Amount | None: ...
+```
+
+Same cross-cutting pattern as `PaymentsFacade`: binds `psp_mandate_ref` (and `idempotency_key` where present) into the structlog context, normalizes non-`ConnectorError` exceptions to `INTERNAL`.
+
+### 4.2 `Connector` ABC and capability interfaces
+
+`Connector` is a **thin internal base** — never implemented directly. Concrete PSP classes implement one or more capability interfaces that extend it. `ConnectorFactory.register` enforces this: a bare `Connector` subclass that implements no capability interface is rejected with `INVALID_REQUEST`.
+
+```python
+# lens/connector.py  — thin internal base (never implemented directly)
 
 class Connector(ABC):
     @property
@@ -126,6 +156,16 @@ class Connector(ABC):
     @abstractmethod
     def base_url(self) -> str: ...
 
+    @abstractmethod
+    async def close(self) -> None: ...
+```
+
+#### `PaymentsConnector(Connector)` — payment-flow capability
+
+```python
+# lens/payments_connector.py
+
+class PaymentsConnector(Connector):
     @property
     @abstractmethod
     def supported_methods(self) -> set[PaymentMethod]: ...
@@ -154,19 +194,47 @@ class Connector(ABC):
     async def sync_refund(self, request: SyncRefundRequest) -> SyncRefundResponse:
         """Poll the PSP for the refund's current status."""
         ...
-
-    @abstractmethod
-    async def handle_webhook(
-        self, raw_payload: bytes, headers: dict[str, str]
-    ) -> WebhookEvent:
-        """Verify the signature and parse the body. The WebhookEvent carries either
-        a PaymentAttempt (for payment-level events) or a RefundEvent (for refund-level).
-        Raises ConnectorError(reason=WEBHOOK_SIGNATURE_FAILED) on bad signature."""
-        ...
-
-    @abstractmethod
-    async def close(self) -> None: ...
 ```
+
+#### `MandateConnector(Connector)` — mandate/subscription capability
+
+Introspection methods are plain (not `async`, not `@property`) because `max_mandate_amount` takes a `rail` argument; the group is kept uniform. The snapshot pins all four as abstract methods.
+
+```python
+# lens/mandate_connector.py
+
+class MandateConnector(Connector):
+    # Introspection (sync, plain methods)
+    @abstractmethod
+    def supported_mandate_rails(self) -> set[MandateRail]: ...
+
+    @abstractmethod
+    def supports_pause(self) -> bool: ...
+
+    @abstractmethod
+    def supported_intervals(self) -> set[MandateIntervalType]: ...
+
+    @abstractmethod
+    def max_mandate_amount(self, rail: MandateRail) -> Amount | None: ...
+
+    # Lifecycle (async)
+    @abstractmethod
+    async def create_subscription(self, request: CreateSubscriptionRequest) -> CreateSubscriptionResponse: ...
+
+    @abstractmethod
+    async def sync_subscription(self, request: SyncSubscriptionRequest) -> SyncSubscriptionResponse: ...
+
+    @abstractmethod
+    async def cancel_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
+
+    @abstractmethod
+    async def pause_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
+
+    @abstractmethod
+    async def resume_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
+```
+
+A PSP connector that supports both flows uses multiple inheritance: `class Cashfree(PaymentsConnector, MandateConnector): ...`. Future `S2SConnector(Connector)` will be additive (minor bump, no further base reshape).
 
 ### 4.3 `ConnectorFactory`
 
@@ -185,28 +253,52 @@ class ConnectorConfig(BaseModel):
 
 class ConnectorFactory:
     _registry: dict[str, type[Connector]] = {}
+    _webhook_registry: dict[str, Callable[[ConnectorConfig], WebhookHandlers]] = {}
 
     @classmethod
     def register(cls, name: str, connector_cls: type[Connector]) -> None:
         """Registers a Connector class under `name`. Validates:
-          1. `connector_cls(stub_config).name == name` — the class's `name`
-             property must match the registry key.
-          2. `connector_cls.requires_lens` (semver string declared
-             on the class or its module) is satisfied by the running
-             Lens version. Use packaging.version.SpecifierSet.
+          1. The class's `name` property matches the registry key.
+          2. The class implements at least one capability interface
+             (PaymentsConnector or MandateConnector). A bare Connector subclass
+             with no capability interface raises INVALID_REQUEST.
 
-        Raises ConnectorError(reason=INVALID_REQUEST) on (1) mismatch;
-        raises ConnectorError(reason=INCOMPATIBLE_VERSION) on (2) mismatch.
+        Raises ConnectorError(reason=INVALID_REQUEST) on (1) or (2) mismatch.
+        There is no connector-version gate: connectors ship bundled inside the
+        `lens` wheel, so they cannot disagree with the running Lens version.
         """
+
+    @classmethod
+    def register_webhook(
+        cls, name: str, build_handlers: Callable[[ConnectorConfig], WebhookHandlers]
+    ) -> None:
+        """Registers the callable that builds WebhookHandlers for a PSP."""
 
     @classmethod
     def create(cls, config: ConnectorConfig) -> Connector: ...
 
     @classmethod
     def list_connectors(cls) -> list[str]: ...
+
+    @classmethod
+    def create_payments_facade(cls, config: ConnectorConfig) -> PaymentsFacade:
+        """Build and return a PaymentsFacade backed by the registered PaymentsConnector.
+        Raises ConnectorError(reason=NOT_SUPPORTED) if the connector does not implement
+        PaymentsConnector."""
+
+    @classmethod
+    def create_mandates_facade(cls, config: ConnectorConfig) -> MandatesFacade:
+        """Build and return a MandatesFacade backed by the registered MandateConnector.
+        Raises ConnectorError(reason=NOT_SUPPORTED) if the connector does not implement
+        MandateConnector."""
+
+    @classmethod
+    def create_webhook_router(cls, config: ConnectorConfig) -> WebhookRouter:
+        """Build and return a WebhookRouter using the WebhookHandlers factory registered
+        via register_webhook. Instantiates no connector and opens no HTTP client."""
 ```
 
-Each `connectors/<psp>/__init__.py` declares `requires_lens` (e.g., `requires_lens = "^0.1"`) at module scope and ends with `ConnectorFactory.register("<psp>", <PspClass>)`.
+Each `connectors/<psp>/__init__.py` ends with `ConnectorFactory.register("<psp>", <PspClass>)` and `ConnectorFactory.register_webhook("<psp>", <build_handlers>)`. Connectors no longer declare `requires_lens` — there is no version gate (constitution §8 changelog v0.6); they ship bundled inside the `lens` wheel.
 
 ### 4.4 Domain types
 
@@ -306,15 +398,106 @@ class RefundEvent(BaseModel):
     failure_reason: str | None = None
 
 
-# Webhook — one event from the PSP, normalized.
-class WebhookEvent(BaseModel):
+# Webhook — one payment/refund event from the PSP, normalized.
+# Renamed from WebhookEvent in v0.2.0 for symmetry with MandateWebhookEvent.
+class PaymentWebhookEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     event_type: WebhookEventType
     psp_event_id: str                              # for dedup (Orbit-side)
     psp_order_id: str | None = None
     attempt: PaymentAttempt | None = None          # populated for PAYMENT_* events
-    refund:  RefundEvent     | None = None         # populated for REFUND_* events
+    refund:  RefundEvent    | None = None          # populated for REFUND_* events
     raw_payload: dict[str, Any]
+```
+
+#### Mandate domain types
+
+```python
+# lens/domain_types/mandates.py
+
+# Shared base for mandate requests. Note: no order_id — mandates are not orders.
+class MandateRequestCommon(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    merchant_id: str
+
+class CustomerContact(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    email: str
+    phone: str
+
+# create_subscription
+class CreateSubscriptionRequest(MandateRequestCommon):
+    idempotency_key: str
+    rail: MandateRail
+    customer_ref: str
+    customer_contact: CustomerContact
+    amount: Amount
+    max_amount: Amount
+    authorization_amount: Amount | None = None     # Cashfree verification charge (optional)
+    authorization_amount_refund: bool = True        # auto-refund the verification charge
+    interval_type: MandateIntervalType
+    interval_count: int = 1
+    first_charge_at: datetime | None = None
+    expires_at: datetime
+    max_cycles: int | None = None
+    description: str
+    return_url: HttpUrl
+    upi_vpa: Maskable[str] | None = None           # UPI collect only; no raw card (hosted)
+
+class ApprovalHandle(BaseModel):                   # frozen=False (response enrichment)
+    type: Literal["REDIRECT", "UPI_INTENT", "UPI_COLLECT", "UPI_QR"]
+    url: str | None = None
+    session_id: str | None = None
+    raw: dict[str, Any] | None = None
+
+class CreateSubscriptionResponse(BaseModel):       # frozen=False
+    psp_mandate_ref: str
+    status: MandateStatus
+    approval: ApprovalHandle
+    raw: dict[str, Any] | None = None
+
+# sync_subscription
+class SyncSubscriptionRequest(MandateRequestCommon):
+    psp_mandate_ref: str
+
+class SyncSubscriptionResponse(BaseModel):         # frozen=False
+    status: MandateStatus
+    next_charge_at: datetime | None = None
+    last_debit: MandateDebitOutcome | None = None
+    raw: dict[str, Any] | None = None
+
+# cancel_subscription / pause_subscription / resume_subscription
+class ManageMandateRequest(MandateRequestCommon):
+    idempotency_key: str
+    psp_mandate_ref: str
+    reason: str | None = None
+    effective_at: datetime | None = None           # resume → Cashfree ACTIVATE next_scheduled_time
+
+class ManageMandateResponse(BaseModel):            # frozen=False
+    status: MandateStatus
+    raw: dict[str, Any] | None = None
+
+# Outcome of one PSP-scheduled debit attempt. Frozen.
+class MandateDebitOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    psp_debit_id: str
+    psp_mandate_ref: str
+    status: MandateDebitStatus
+    amount: Amount
+    failure_code: PaymentFailureCode | None = None
+    occurred_at: datetime
+    psp_attempt: int | None = None
+
+# Webhook — one mandate/subscription event from the PSP, normalized.
+class MandateWebhookEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    event_type: WebhookEventType
+    psp_mandate_ref: str
+    psp_event_id: str
+    occurred_at: datetime
+    mandate_status: MandateStatus | None = None
+    debit: MandateDebitOutcome | None = None
+    raw: dict[str, Any]
 ```
 
 ### 4.5 Common / utility types
@@ -339,6 +522,41 @@ class ConnectorError(Exception):
         psp_message: str | None = None,
     ): ...
 ```
+
+### 4.5a Webhook routing
+
+The shared `WebhookRouter` replaces per-connector `handle_webhook`. Orbit obtains one via `ConnectorFactory.create_webhook_router(config)`.
+
+```python
+# lens/webhook.py
+
+class WebhookFamily(StrEnum):
+    PAYMENT = "PAYMENT"
+    MANDATE = "MANDATE"
+
+
+@dataclass(frozen=True)
+class WebhookHandlers:
+    """Callables supplied by the PSP package; closed over ConnectorConfig secrets."""
+    verify: Callable[[bytes, dict[str, str]], bool]
+    classify: Callable[[bytes], WebhookFamily]
+    parse_payment: Callable[[bytes], PaymentWebhookEvent] | None = None
+    parse_mandate: Callable[[bytes], MandateWebhookEvent] | None = None
+
+
+class WebhookRouter:
+    def __init__(self, handlers: WebhookHandlers) -> None: ...
+
+    async def handle(
+        self, raw_payload: bytes, headers: dict[str, str]
+    ) -> PaymentWebhookEvent | MandateWebhookEvent:
+        """Verify signature once; route by WebhookFamily; return the normalized event.
+        Raises ConnectorError(reason=WEBHOOK_SIGNATURE_FAILED) on bad signature.
+        Raises ConnectorError(reason=NOT_SUPPORTED) on unknown family."""
+        ...
+```
+
+`handle` is `async` for API symmetry; it performs no I/O. `classify` does a minimal envelope parse (reads the PSP event-type field) and returns the family — `PAYMENT` for order/payment/refund events, `MANDATE` for subscription/debit events. Unknown *within* a family is the family parser's concern; unknown *family* raises `NOT_SUPPORTED`.
 
 ### 4.6 Enums (all locked)
 
@@ -373,6 +591,7 @@ class RefundStatus(StrEnum):
     FAILED = "FAILED"
 
 class PaymentFailureCode(StrEnum):
+    # Original payment failure codes
     USER_DROPPED = "USER_DROPPED"
     USER_CANCELLED = "USER_CANCELLED"
     CARD_DECLINED = "CARD_DECLINED"
@@ -384,14 +603,81 @@ class PaymentFailureCode(StrEnum):
     PSP_ERROR = "PSP_ERROR"
     NETWORK_ERROR = "NETWORK_ERROR"
     UNKNOWN = "UNKNOWN"
+    # Added in v0.2.0 for mandate debit failures
+    MANDATE_REVOKED = "MANDATE_REVOKED"
+    MANDATE_PAUSED = "MANDATE_PAUSED"
+    MANDATE_EXPIRED = "MANDATE_EXPIRED"
+    MANDATE_NOT_FOUND = "MANDATE_NOT_FOUND"
+    DEBIT_LIMIT_EXCEEDED = "DEBIT_LIMIT_EXCEEDED"
 
 class WebhookEventType(StrEnum):
+    # Payment / refund events
     PAYMENT_INITIATED = "PAYMENT_INITIATED"        # rare; some PSPs emit pending events
     PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     PAYMENT_FAILED = "PAYMENT_FAILED"
     ORDER_EXPIRED = "ORDER_EXPIRED"
     REFUND_SUCCESS = "REFUND_SUCCESS"
     REFUND_FAILED = "REFUND_FAILED"
+    # Mandate lifecycle events — added in v0.2.0
+    MANDATE_AUTHORIZED = "MANDATE_AUTHORIZED"
+    MANDATE_REJECTED = "MANDATE_REJECTED"
+    MANDATE_PAUSED = "MANDATE_PAUSED"
+    MANDATE_RESUMED = "MANDATE_RESUMED"
+    MANDATE_CANCELLED = "MANDATE_CANCELLED"
+    MANDATE_REVOKED = "MANDATE_REVOKED"
+    MANDATE_SUSPENDED = "MANDATE_SUSPENDED"
+    MANDATE_EXPIRED = "MANDATE_EXPIRED"
+    MANDATE_COMPLETED = "MANDATE_COMPLETED"
+    MANDATE_DEBIT_SUCCESS = "MANDATE_DEBIT_SUCCESS"
+    MANDATE_DEBIT_FAILED = "MANDATE_DEBIT_FAILED"
+    MANDATE_DEBIT_NOTIFIED = "MANDATE_DEBIT_NOTIFIED"
+    MANDATE_EXPIRING_SOON = "MANDATE_EXPIRING_SOON"
+
+# Mandate-specific enums — added in v0.2.0
+class MandateRail(StrEnum):
+    UPI_AUTOPAY = "UPI_AUTOPAY"
+    CARD_EMANDATE = "CARD_EMANDATE"
+
+class MandateStatus(StrEnum):
+    PENDING_AUTHORIZATION = "PENDING_AUTHORIZATION"
+    ACTIVE = "ACTIVE"
+    PAUSED = "PAUSED"
+    SUSPENDED = "SUSPENDED"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+class MandateIntervalType(StrEnum):
+    DAY = "DAY"
+    WEEK = "WEEK"
+    MONTH = "MONTH"
+    YEAR = "YEAR"
+
+class MandateDebitStatus(StrEnum):
+    PENDING = "PENDING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+class FailureClass(StrEnum):
+    RETRIABLE = "RETRIABLE"
+    TERMINAL = "TERMINAL"
+
+# Published classification data (read-only MappingProxyType).
+# Lens never branches on this — it is stateless. Orbit reads it to decide
+# charge_failed vs charge_failed_final.
+FAILURE_CLASS: Mapping[PaymentFailureCode, FailureClass] = MappingProxyType({
+    PaymentFailureCode.INSUFFICIENT_FUNDS:   FailureClass.RETRIABLE,
+    PaymentFailureCode.NETWORK_ERROR:        FailureClass.RETRIABLE,
+    PaymentFailureCode.PSP_ERROR:            FailureClass.RETRIABLE,
+    PaymentFailureCode.CARD_DECLINED:        FailureClass.TERMINAL,
+    PaymentFailureCode.INVALID_INSTRUMENT:   FailureClass.TERMINAL,
+    PaymentFailureCode.MANDATE_REVOKED:      FailureClass.TERMINAL,
+    PaymentFailureCode.MANDATE_PAUSED:       FailureClass.TERMINAL,
+    PaymentFailureCode.MANDATE_EXPIRED:      FailureClass.TERMINAL,
+    PaymentFailureCode.MANDATE_NOT_FOUND:    FailureClass.TERMINAL,
+    PaymentFailureCode.DEBIT_LIMIT_EXCEEDED: FailureClass.TERMINAL,
+})
 
 class ConnectorErrorReason(StrEnum):
     INVALID_REQUEST = "INVALID_REQUEST"
@@ -409,14 +695,16 @@ class ConnectorErrorReason(StrEnum):
                                                   # (or by this v1 Connector — e.g.,
                                                   #  authorize/capture/void from the
                                                   #  future s2s ABC)
-    INCOMPATIBLE_VERSION = "INCOMPATIBLE_VERSION"  # connector's required Lens
-                                                    # version doesn't match runtime
+    INCOMPATIBLE_VERSION = "INCOMPATIBLE_VERSION"  # retained in the taxonomy; no
+                                                    # longer raised by register (the
+                                                    # connector version gate was
+                                                    # removed in constitution v0.6)
     INTERNAL = "INTERNAL"
 ```
 
 ### 4.7 Public-surface snapshot
 
-`tests/snapshot/public_surface.py` lists every public symbol and its signature. CI fails on drift.
+`tests/snapshot/public_surface.py` lists every public symbol and its signature. CI fails on drift. The snapshot was updated in v0.2.0 to cover the full expanded surface (51 symbols): capability-interface ABCs (`PaymentsConnector`, `MandateConnector`), `MandatesFacade`, `WebhookRouter`, `WebhookHandlers`, `WebhookFamily`, `PaymentWebhookEvent` (renamed), mandate domain types and request/response models, mandate enums, `FailureClass`, `FAILURE_CLASS`. `Connector` entry's `abstract_methods` shrank to `{close}` (properties: `name`, `base_url`). Do **not** edit this file to silence a failing test — a genuine surface change requires updating the governance docs first.
 
 ---
 
@@ -424,33 +712,50 @@ class ConnectorErrorReason(StrEnum):
 
 ### 5.1 File layout
 
+Inside `sylibs/packages/lens/`:
+
 ```
-lens/
-  __init__.py            # re-exports public surface
-  facade.py              # PaymentsFacade
-  factory.py             # ConnectorFactory + ConnectorConfig
-  connector.py           # Connector ABC
-  domain_types/          # request/response models + PaymentAttempt + Amount + WebhookEvent + RefundEvent
-    __init__.py
-  common/                # Maskable, ConnectorError
-    __init__.py
-  enums/                 # Currency, PaymentMethod, OrderStatus, PaymentAttemptStatus,
+packages/lens/
+  pyproject.toml         # distribution name `lens`; dynamic version from lens.__version__
+  README.md
+  CHANGELOG.md           # Keep-a-Changelog format; one entry per release
+  src/
+    lens/
+      __init__.py        # re-exports public surface; declares __version__
+      facade.py          # PaymentsFacade
+      factory.py         # ConnectorFactory + ConnectorConfig
+      connector.py       # Connector ABC
+      domain_types/      # request/response models + PaymentAttempt + Amount + PaymentWebhookEvent + RefundEvent + mandate types
+        __init__.py
+      common/            # Maskable, ConnectorError, mask_processor
+        __init__.py
+      enums/             # Currency, PaymentMethod, OrderStatus, PaymentAttemptStatus,
                          # RefundStatus, PaymentFailureCode, WebhookEventType, ConnectorErrorReason
-    __init__.py
-  http/                  # internal httpx client factory
-    __init__.py
-  connectors/
-    __init__.py
-    cashfree/
-      __init__.py        # ends with ConnectorFactory.register("cashfree", Cashfree)
-      connector.py       # class Cashfree(Connector): ...
-      auth.py
-      models.py          # Cashfree wire-level Pydantic models
-      status_map.py      # Cashfree-specific term → (PaymentAttemptStatus, PaymentFailureCode)
-      tests/
+        __init__.py
+      http/              # internal httpx client factory
+        __init__.py
+      connectors/
+        __init__.py
+        cashfree/
+          __init__.py    # ends with ConnectorFactory.register("cashfree", Cashfree)
+          connector.py   # class Cashfree(Connector): ...
+          auth.py
+          models.py      # Cashfree wire-level Pydantic models
+          status_map.py  # Cashfree-specific term → (PaymentAttemptStatus, PaymentFailureCode)
+  tests/                 # pytest tree; runs from inside `packages/lens/` with pythonpath = ["src", "."]
+    snapshot/            # locked-surface pin (test_surface_pinned.py)
+    unit/                # Maskable, ConnectorError, Amount, ABC, factory, http, legacy isolation
+    integration/         # facade + per-PSP integration tests via httpx.MockTransport
+      stub_connector.py
+      connectors/cashfree/
   legacy/                # archived from Plan C; NOT shipped in v1
-    cashfree_s2s/
-    cashfree_authorize/
+    connector_service_plan_c/
+    tests_plan_c/
+  docs/
+    audit-plan-c.md
+    superpowers/
+      specs/             # this file and its siblings
+      plans/
 ```
 
 ### 5.2 Mapping PSP terms to our taxonomy — Cashfree example
@@ -547,43 +852,22 @@ class Cashfree(Connector):
             attempts=attempts,
         )
 
-    async def handle_webhook(self, raw_payload, headers) -> WebhookEvent:
-        # 1. Verify signature.
-        if not _verify_cashfree_signature(self._config, raw_payload, headers):
-            raise ConnectorError(reason=ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED)
-
-        # 2. Parse the PSP event.
-        psp_event = CashfreeWebhookEvent.model_validate_json(raw_payload)
-
-        # 3. Build the WebhookEvent, populating attempt OR refund based on type.
-        if psp_event.type.startswith("PAYMENT_"):
-            attempt = _payment_to_attempt(psp_event.data.payment)
-            return WebhookEvent(
-                event_type=_map_event_type(psp_event.type),
-                psp_event_id=psp_event.event_id,
-                psp_order_id=psp_event.data.order.cf_order_id,
-                attempt=attempt,
-                raw_payload=psp_event.model_dump(),
-            )
-        elif psp_event.type.startswith("REFUND_"):
-            refund = _to_refund_event(psp_event.data.refund)
-            return WebhookEvent(
-                event_type=_map_event_type(psp_event.type),
-                psp_event_id=psp_event.event_id,
-                psp_order_id=psp_event.data.order.cf_order_id if psp_event.data.order else None,
-                refund=refund,
-                raw_payload=psp_event.model_dump(),
-            )
-        elif psp_event.type == "ORDER_EXPIRED":
-            return WebhookEvent(
-                event_type=WebhookEventType.ORDER_EXPIRED,
-                psp_event_id=psp_event.event_id,
-                psp_order_id=psp_event.data.order.cf_order_id,
-                raw_payload=psp_event.model_dump(),
-            )
-        else:
-            # Unknown event type — log + still return a benign event Orbit can ignore.
-            ...
+    # NOTE: handle_webhook is no longer on any Connector (v0.2.0).
+    # Webhook parsing is now done by parser callables supplied to WebhookRouter.
+    # The parse_payment callable for Cashfree would contain similar logic to what
+    # was here, returning PaymentWebhookEvent instead of WebhookEvent.
+    # Example of what the parse_payment callable does:
+    #
+    # def _parse_cashfree_payment_event(raw_payload: bytes) -> PaymentWebhookEvent:
+    #     psp_event = CashfreeWebhookEvent.model_validate_json(raw_payload)
+    #     attempt = _payment_to_attempt(psp_event.data.payment)
+    #     return PaymentWebhookEvent(
+    #         event_type=_map_event_type(psp_event.type),
+    #         psp_event_id=psp_event.event_id,
+    #         psp_order_id=psp_event.data.order.cf_order_id,
+    #         attempt=attempt,
+    #         raw_payload=psp_event.model_dump(),
+    #     )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -608,7 +892,7 @@ Connectors never construct httpx directly. Tests inject `httpx.MockTransport`.
 | PII masking in logs | `Maskable[T]` `__str__` + structlog processor |
 | Error normalization to `ConnectorError` | inside each `Connector` method |
 | Mapping PSP-specific outcome terms → `PaymentAttemptStatus` + `PaymentFailureCode` | each `connectors/<psp>/status_map.py` |
-| Webhook signature verification | inside `Connector.handle_webhook` |
+| Webhook signature verification | `WebhookRouter.handle` (via `WebhookHandlers.verify` callable supplied by PSP package) |
 | Webhook dedup, ledger updates | **Orbit**, not here |
 | Idempotency key dedup | **Orbit**. Lens only passes the key through to the PSP. |
 
@@ -666,11 +950,11 @@ Inherits constitution §6. Additions:
     - `refund` → PSP returns refund_id.
     - `sync_refund` → PSP returns refund status.
 - [ ] Cashfree's `status_map.py` covers every Cashfree payment status documented in their API; unmapped values fall back to `PaymentFailureCode.UNKNOWN` and log a warning.
-- [ ] Webhook tests:
-    - Signed Cashfree `PAYMENT_SUCCESS_WEBHOOK` → `WebhookEvent` with `attempt.status == SUCCESS`.
-    - Signed Cashfree `PAYMENT_FAILED_WEBHOOK` → `WebhookEvent` with `attempt.status == FAILED` and `failure_code` populated.
-    - Signed Cashfree `PAYMENT_USER_DROPPED_WEBHOOK` → `WebhookEvent` with `attempt.status == FAILED` and `failure_code == USER_DROPPED`.
-    - Signed Cashfree `REFUND_SUCCESS_WEBHOOK` → `WebhookEvent` with `refund.status == SUCCESS`.
+- [ ] Webhook tests (via `WebhookRouter` + Cashfree-supplied `WebhookHandlers`):
+    - Signed Cashfree `PAYMENT_SUCCESS_WEBHOOK` → `PaymentWebhookEvent` with `attempt.status == SUCCESS`.
+    - Signed Cashfree `PAYMENT_FAILED_WEBHOOK` → `PaymentWebhookEvent` with `attempt.status == FAILED` and `failure_code` populated.
+    - Signed Cashfree `PAYMENT_USER_DROPPED_WEBHOOK` → `PaymentWebhookEvent` with `attempt.status == FAILED` and `failure_code == USER_DROPPED`.
+    - Signed Cashfree `REFUND_SUCCESS_WEBHOOK` → `PaymentWebhookEvent` with `refund.status == SUCCESS`.
     - Tampered payload → `ConnectorError(WEBHOOK_SIGNATURE_FAILED)`.
 - [ ] Optional CI job against Cashfree sandbox passes for each of the four flows.
 - [ ] Package builds, `pip install -e .` works in a fresh venv.
@@ -695,10 +979,10 @@ Total: ~7 days single-agent. Steps 1 + 2 sequential; Step 3 can run in parallel 
 ## §10. Open questions for the implementing agent
 
 - **Q1** (constitution OQ-4): naming. `Connector` (not `PaymentConnector`); `Order` and `PaymentAttempt` as the two first-class entities. First PR is a bulk rename.
-- **Q2**: `WebhookEvent.raw_payload` — keep for debugging? **Yes** — useful for replay and PSP-bug forensics; never logged directly.
+- **Q2**: `PaymentWebhookEvent.raw_payload` — keep for debugging? **Yes** — useful for replay and PSP-bug forensics; never logged directly. Same applies to `MandateWebhookEvent.raw`.
 - **Q3** (constitution OQ-6): same idempotency key on retry. Confirmed.
 - **Q4**: Should `PaymentAttempt.amount` always be populated, or only on `SUCCESS`? **Recommendation**: only on `SUCCESS` (PSPs vary; treat as optional everywhere else).
 - **Q5**: Should Cashfree's `sync_payment` always make both calls (`/orders/{id}` + `/orders/{id}/payments`)? **Recommendation**: yes for v1 simplicity. Optimize to single call later if Cashfree adds an "include payments" parameter.
 - **Q6**: For `FRAUD_REVIEW_PENDING` (an attempt sitting in PSP review), how do we ensure resolution arrives? **Recommendation**: rely on the PSP webhook for resolution (Cashfree emits a follow-up `PAYMENT_SUCCESS` or `PAYMENT_FAILED` after review). Orbit's janitor can also poll `sync_payment` for orders whose only attempt is `PENDING` + age > 1h, as a safety net.
-- **Q7**: What if a PSP emits a webhook for a payment we haven't seen via `create_order`? **Recommendation**: still verify + parse + return the `WebhookEvent`. Orbit decides what to do with an orphan event (likely log + ignore, since we created the order so we should have a record).
-- **Q8**: `PaymentAttempt` is `frozen=True` — but should it be? Each attempt has a fixed lifecycle once observed; we don't mutate the model itself, we create new instances when status updates arrive (or carry a single one in a WebhookEvent). **Recommendation**: keep `frozen=True`.
+- **Q7**: What if a PSP emits a webhook for a payment we haven't seen via `create_order`? **Recommendation**: still verify + parse + return the `PaymentWebhookEvent`. Orbit decides what to do with an orphan event (likely log + ignore, since we created the order so we should have a record).
+- **Q8**: `PaymentAttempt` is `frozen=True` — but should it be? Each attempt has a fixed lifecycle once observed; we don't mutate the model itself, we create new instances when status updates arrive (or carry a single one in a `PaymentWebhookEvent`). **Recommendation**: keep `frozen=True`.

@@ -78,11 +78,56 @@ async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse
 
 ## Tests
 
-`tests/test_create_order.py`:
+`tests/test_create_order.py` (package-local; Grace relocates `tests/` after generation):
 
 - **Happy path** — `httpx.MockTransport` returns the PSP's success payload; assert the returned `CreateOrderResponse` has the right `psp_order_id`, `payment_link`, and `status == OrderStatus.CREATED`.
 - **4xx path** — transport returns `400` with a PSP error body; assert `ConnectorError(reason=INVALID_REQUEST)` (or the more specific reason).
+- **5xx path** — transport returns `503`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **Network-error path** — `MockTransport` raises `httpx.ConnectError`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **`_map_http_error` branch coverage** — parametrized test over the key branches (at minimum: 400, 401, 403, 404, 409, 429, one 5xx); assert the expected `ConnectorErrorReason` for each.
+- **`payment_link` absent** — transport returns 200 but the link field is missing/null; assert `ConnectorError(reason=INTERNAL)`.
 - (Optional) **Idempotency-key path** — assert the `x-idempotency-key` header is forwarded when the request carries one.
+
+## `payment_link` is REQUIRED (non-None)
+
+`CreateOrderResponse.payment_link` is typed `HttpUrl` — it is **not** `str | None`. If the PSP
+response omits the link or the session URL field, do not return `None`; raise instead:
+
+```python
+from pydantic import HttpUrl
+
+payment_link_str = psp_resp.payment_sessions_url or psp_resp.payment_link
+if not payment_link_str:
+    raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)
+
+return CreateOrderResponse(
+    psp_order_id=psp_resp.cf_order_id,
+    payment_link=HttpUrl(payment_link_str),   # ← coerce str→HttpUrl; required, non-optional
+    status=OrderStatus.CREATED,
+    expires_at=psp_resp.order_expiry_time,
+)
+```
+
+**mypy `--strict` requires `HttpUrl(url)` coercion.** Passing a bare `str` variable:
+
+```python
+# WRONG — mypy strict error: "str" incompatible with "HttpUrl"
+return CreateOrderResponse(payment_link=payment_link_str, …)
+```
+
+```python
+# WRONG — pydantic validation fails on None:
+return CreateOrderResponse(
+    psp_order_id=…,
+    payment_link=None,   # ← ValidationError at runtime
+    …
+)
+```
+
+Add a `payment_link absent` test case: transport returns a body where the link field is missing
+or null; assert `ConnectorError(reason=INTERNAL)`.
+
+---
 
 ## Notes
 

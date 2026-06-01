@@ -1,84 +1,266 @@
-# Connector ABC (locked)
+# Connector ABCs (capability interfaces)
 
-This is the locked surface from `SUBPROJECT_LENS.md` §4.2. Do not invent additional methods. Do not rename properties. Hand-edits to the surface are forbidden — if it's broken, fix it upstream in Lens.
+Lens 0.2.0 uses a **capability-interface split**. You never subclass the thin `Connector` base
+directly; instead you subclass one of the concrete capability interfaces:
 
-The class you emit subclasses this ABC. All four flow methods, both webhook + close methods, and all four properties are mandatory.
+| Capability | Interface | Domain folder |
+|---|---|---|
+| Hosted-checkout payments | `PaymentsConnector` | `orders/` |
+| Subscription mandates | `MandateConnector` | `subscriptions/` |
+
+`ConnectorFactory.register(...)` rejects any class that is not a `PaymentsConnector` or
+`MandateConnector` instance — a bare `Connector` subclass raises at import time.
+
+---
+
+## The shared base: `_<Psp>Base(Connector)`
+
+A per-PSP **private** base class lives in `core/base.py`. It owns:
+
+- `name` property (returns the PSP's registry key, e.g. `"<psp>"`).
+- `base_url` property (sandbox URL hard-coded in v1; overridable at runtime via
+  `ConnectorConfig.base_url_override`).
+- `close()` — closes the ONE shared `httpx.AsyncClient`.
+- `__init__(config: ConnectorConfig)` — stores `_config`, builds the single `_client`.
 
 ```python
-# lens/connector.py
+# core/base.py
+from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from lens.domain_types import (
-        CreateOrderRequest, CreateOrderResponse,
-        SyncPaymentRequest, SyncPaymentResponse,
-        RefundRequest, RefundResponse,
-        SyncRefundRequest, SyncRefundResponse,
-        WebhookEvent,
-    )
-    from lens.enums import PaymentMethod
+from lens.connector import Connector
+from lens.factory import ConnectorConfig
+import httpx
 
 
-class Connector(ABC):
+class _<Psp>Base(Connector):
     @property
-    @abstractmethod
-    def name(self) -> str: ...                              # e.g., "cashfree"
+    def name(self) -> str:
+        return "<psp>"
 
     @property
-    @abstractmethod
-    def base_url(self) -> str: ...
+    def base_url(self) -> str:
+        return "<PSP_SANDBOX_URL>"   # hard-coded; override via config.base_url_override
 
-    @property
-    @abstractmethod
-    def supported_methods(self) -> set[PaymentMethod]: ...
+    def __init__(self, config: ConnectorConfig) -> None:
+        self._config = config
+        self._client = httpx.AsyncClient(
+            base_url=str(config.base_url_override) if config.base_url_override else self.base_url,
+            timeout=30.0,
+        )
 
-    @property
-    @abstractmethod
-    def supports_idempotency_key(self) -> bool: ...
-
-    @abstractmethod
-    async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse:
-        """Create a hosted-checkout session/order. Returns psp_order_id and payment_link."""
-        ...
-
-    @abstractmethod
-    async def sync_payment(self, request: SyncPaymentRequest) -> SyncPaymentResponse:
-        """Poll the PSP for the order's current OrderStatus and the list of
-        PaymentAttempts observed under it."""
-        ...
-
-    @abstractmethod
-    async def refund(self, request: RefundRequest) -> RefundResponse:
-        """Initiate a refund against the successful PaymentAttempt of an order."""
-        ...
-
-    @abstractmethod
-    async def sync_refund(self, request: SyncRefundRequest) -> SyncRefundResponse:
-        """Poll the PSP for the refund's current status."""
-        ...
-
-    @abstractmethod
-    async def handle_webhook(
-        self, raw_payload: bytes, headers: dict[str, str]
-    ) -> WebhookEvent:
-        """Verify the signature and parse the body. The WebhookEvent carries either
-        a PaymentAttempt (for payment-level events) or a RefundEvent (for refund-level).
-        Raises ConnectorError(reason=WEBHOOK_SIGNATURE_FAILED) on bad signature."""
-        ...
-
-    @abstractmethod
-    async def close(self) -> None: ...
+    async def close(self) -> None:
+        await self._client.aclose()
 ```
+
+One client, owned by `_<Psp>Base`, shared by every domain mixin.
+
+---
+
+## Domain mixin: `<Psp>Orders(_<Psp>Base, PaymentsConnector)`
+
+Implements the four payment flows. Lives in `orders/connector.py`.
+
+```python
+# orders/connector.py
+from __future__ import annotations
+
+from lens.payments_connector import PaymentsConnector
+from lens.domain_types import (
+    CreateOrderRequest, CreateOrderResponse,
+    SyncPaymentRequest, SyncPaymentResponse,
+    RefundRequest, RefundResponse,
+    SyncRefundRequest, SyncRefundResponse,
+)
+from lens.enums import PaymentMethod
+from <psp>.core.base import _<Psp>Base
+
+
+class <Psp>Orders(_<Psp>Base, PaymentsConnector):
+
+    @property
+    def supported_methods(self) -> set[PaymentMethod]:
+        return {PaymentMethod.CARD, PaymentMethod.UPI}   # PSP-specific allow-list
+
+    @property
+    def supports_idempotency_key(self) -> bool:
+        return True   # or False — per PSP docs
+
+    async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse: ...
+    async def sync_payment(self, request: SyncPaymentRequest) -> SyncPaymentResponse: ...
+    async def refund(self, request: RefundRequest) -> RefundResponse: ...
+    async def sync_refund(self, request: SyncRefundRequest) -> SyncRefundResponse: ...
+```
+
+`PaymentsConnector` (from `lens/payments_connector.py`) declares these signatures.
+Do **not** add extra parameters or change return types.
+
+---
+
+## Domain mixin: `<Psp>Subscriptions(_<Psp>Base, MandateConnector)`
+
+Implements the five lifecycle methods + four introspection methods. Lives in
+`subscriptions/connector.py`.
+
+```python
+# subscriptions/connector.py
+from __future__ import annotations
+
+from lens.mandate_connector import MandateConnector
+from lens.domain_types import (
+    CreateSubscriptionRequest, CreateSubscriptionResponse,
+    SyncSubscriptionRequest, SyncSubscriptionResponse,
+    ManageMandateRequest, ManageMandateResponse,
+    Amount,
+)
+from lens.enums import MandateIntervalType, MandateRail
+from <psp>.core.base import _<Psp>Base
+
+
+class <Psp>Subscriptions(_<Psp>Base, MandateConnector):
+
+    # --- 4 introspection methods (plain def, NOT @property) ---
+
+    def supported_mandate_rails(self) -> set[MandateRail]:
+        return {MandateRail.UPI_AUTOPAY, MandateRail.CARD_EMANDATE}
+
+    def supports_pause(self) -> bool:
+        return True   # per PSP docs
+
+    def supported_intervals(self) -> set[MandateIntervalType]:
+        return {MandateIntervalType.MONTH}   # per PSP docs
+
+    def max_mandate_amount(self, rail: MandateRail) -> Amount | None:
+        return None   # unknown / PSP-defined
+
+    # --- 5 lifecycle methods (async) ---
+
+    async def create_subscription(
+        self, request: CreateSubscriptionRequest
+    ) -> CreateSubscriptionResponse: ...
+
+    async def sync_subscription(
+        self, request: SyncSubscriptionRequest
+    ) -> SyncSubscriptionResponse: ...
+
+    async def cancel_subscription(
+        self, request: ManageMandateRequest
+    ) -> ManageMandateResponse: ...
+
+    async def pause_subscription(
+        self, request: ManageMandateRequest
+    ) -> ManageMandateResponse: ...
+
+    async def resume_subscription(
+        self, request: ManageMandateRequest
+    ) -> ManageMandateResponse: ...
+```
+
+**`MandateConnector` is singular** — the class and import are `MandateConnector` (not
+`MandatesConnector`). Only the *facade* is plural (`MandatesFacade`).
+
+The four introspection methods (`supported_mandate_rails`, `supports_pause`,
+`supported_intervals`, `max_mandate_amount`) are **plain methods, not `@property`**. The
+ABC declares them without `@abstractmethod` + `@property` stacking. `max_mandate_amount`
+takes a `rail: MandateRail` argument, which is why it cannot be a property.
+
+---
+
+## Grace-owned compose surface
+
+The root `connector.py` (Grace-generated, not per-domain) composes both mixins:
+
+```python
+# connector.py  (root of the generated package)
+from <psp>.orders.connector import <Psp>Orders
+from <psp>.subscriptions.connector import <Psp>Subscriptions
+
+
+class <Psp>Connector(<Psp>Orders, <Psp>Subscriptions):
+    """Full-capability connector. MRO resolves _<Psp>Base once (C3)."""
+```
+
+`_<Psp>Base` appears once in the MRO — Python's C3 linearization handles it automatically.
+The composed class has zero leftover abstract methods; it passes `ConnectorFactory.register`.
+
+---
 
 ## Rules when implementing
 
-1. **`name` is a `@property` returning a string literal.** It must match the registry key (`ConnectorFactory.register("<name>", <Psp>)`).
-2. **`base_url` is a `@property`.** Hard-coded sandbox URL for v1; `ConnectorConfig.base_url_override` may override at runtime.
-3. **`supported_methods` returns a `set[PaymentMethod]`.** Only methods the PSP supports on hosted checkout.
-4. **`supports_idempotency_key` is `bool`.** True iff the PSP honors a caller-supplied key.
-5. **`__init__` takes a single `ConnectorConfig`.** Build the httpx client there; close it in `close()`.
-6. **Each flow method has the exact signature above.** No extra parameters; no overloads; no defaults that change the public surface.
-7. **Errors:** every method that hits the network catches `httpx` errors and raises `ConnectorError(reason=...)`. Never let a raw `httpx.HTTPError` escape.
-8. **`handle_webhook` raises `ConnectorError(reason=ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED)` when the signature fails.** No exceptions to this.
+1. **`name` is a `@property` returning a string literal** matching the registry key
+   (`ConnectorFactory.register("<psp>", <Psp>Connector)`).
+2. **`base_url` is a `@property`.** Hard-code the sandbox URL in `_<Psp>Base`; apply
+   `config.base_url_override` at `__init__` time.
+3. **One `httpx.AsyncClient`, built in `_<Psp>Base.__init__`.** Never build a second client
+   in a domain mixin.
+4. **`__init__` takes a single `ConnectorConfig`.** Build the client there; do not call
+   `.expose()` on optional credentials — defer that to call time.
+5. **Each flow method has the exact ABC signature.** No extra parameters, no defaults that
+   change the public surface.
+6. **Errors:** every method that hits the network catches `httpx` errors and raises
+   `ConnectorError(reason=...)`. Never let a raw `httpx.HTTPError` escape.
+7. **Introspection methods are plain `def`, not `async def`, not `@property`.** They return
+   in-memory constants; no I/O involved.
+8. **Both `ConnectorFactory.register(...)` and `ConnectorFactory.register_webhook(...)` must be
+   called at module scope in `__init__.py`.** Do **not** declare `requires_lens` — the connector
+   version gate was removed in constitution v0.6.
+9. **Authentication None-guard in `core/auth.py`** — credential optionality:
+   - `config.api_key` is `Maskable[str]` — always present, safe to call `.expose()` directly.
+   - `config.secret_key` is `Maskable[str] | None` — guard with `assert … is not None` or
+     `if … is None: raise ConnectorError(reason=ConnectorErrorReason.AUTHENTICATION_FAILED)`
+     before calling `.expose()`.
+   - `config.webhook_secret` is `Maskable[str] | None` — same None-guard required before
+     `.expose()` in `verify_signature`.
+   Calling `.expose()` on a `None` value raises `AttributeError` at runtime and crashes
+   `mypy --strict` type checking.
+
+---
+
+## Error mapping (shared `_map_http_error` + `_extract_psp_error`) — MANDATORY, every connector
+
+Each domain `connector.py` defines a module-level `_map_http_error`, used by every flow's
+`except httpx.HTTPStatusError` arm. It MUST surface the PSP's own error code/message — never
+swallow the PSP's real reason. The status→reason mapping is unchanged; the requirement is that
+`psp_code`/`psp_message` are set on **every** returned `ConnectorError`.
+
+```python
+def _extract_psp_error(e: httpx.HTTPStatusError) -> tuple[str | None, str | None]:
+    """Pull the PSP's (code, message) from an error response body, if present."""
+    try:
+        body = e.response.json()
+    except (ValueError, TypeError):
+        return None, None
+    if not isinstance(body, dict):
+        return None, None
+    code = body.get("code")
+    message = body.get("message")
+    return (
+        code if isinstance(code, str) else None,
+        message if isinstance(message, str) else None,
+    )
+
+
+def _map_http_error(e: httpx.HTTPStatusError) -> ConnectorError:
+    """Map an HTTP status error to a ConnectorError, preserving the PSP code/message."""
+    status = e.response.status_code
+    psp_code, psp_message = _extract_psp_error(e)
+    reason_by_status: dict[int, ConnectorErrorReason] = {
+        401: ConnectorErrorReason.AUTHENTICATION_FAILED,
+        403: ConnectorErrorReason.AUTHORIZATION_FAILED,
+        404: ConnectorErrorReason.ORDER_NOT_FOUND,
+        409: ConnectorErrorReason.INVALID_ORDER_STATE,
+        429: ConnectorErrorReason.RATE_LIMITED,
+        400: ConnectorErrorReason.INVALID_REQUEST,
+        422: ConnectorErrorReason.INVALID_REQUEST,
+    }
+    reason = reason_by_status.get(status, ConnectorErrorReason.PSP_UNAVAILABLE)
+    return ConnectorError(reason=reason, psp_code=psp_code, psp_message=psp_message)
+```
+
+- `ConnectorError` accepts `psp_code: str | None` and `psp_message: str | None` — set them
+  whenever a PSP detail is available (also on the `except ValidationError` arm:
+  `ConnectorError(reason=INTERNAL, psp_message=str(e))`).
+- **Adapt `_extract_psp_error` to the PSP's documented error-body shape.** `{code, message}`
+  is the common case; if the PSP nests it (e.g. `{"error": {...}}`) read the documented path —
+  see `connector_docs/<psp>.md`.
+- Without this, connectors swallow the PSP's real reason (e.g. Cashfree's
+  `auth_amount_invalid_for_action`), making live failures undiagnosable.

@@ -157,6 +157,14 @@ def _log_report_paths(reports_dir: Path) -> None:
     """Print the locations of quality_report.json + coverage.json with a
     short tip on the most useful jq invocations. Called from the `finally`
     branch of `generate` so it fires on both success and failure paths.
+
+    When quality_report.json contains a non-empty ``by_domain`` map, also
+    prints a compact per-domain summary table:
+
+        Per-domain:
+          domain         mypy   tests_failed   coverage
+          orders           21             11      75.3%
+          subscriptions     8              0      85.6%
     """
     quality = reports_dir / "quality_report.json"
     coverage = reports_dir / "coverage.json"
@@ -171,6 +179,27 @@ def _log_report_paths(reports_dir: Path) -> None:
             "  inspect:   "
             f"cat {quality} | python -m json.tool"
         )
+        # Print per-domain breakdown table when present.
+        try:
+            report_data: Any = json.loads(quality.read_text())
+            by_domain: Any = report_data.get("by_domain") if isinstance(report_data, dict) else None
+            if isinstance(by_domain, dict) and by_domain:
+                click.echo()
+                click.echo("Per-domain:")
+                header = f"  {'domain':<16} {'mypy':>6}   {'tests_failed':>12}   {'coverage':>8}"
+                click.echo(header)
+                for domain, metrics in sorted(by_domain.items()):
+                    if not isinstance(metrics, dict):
+                        continue
+                    mypy_errors = int(metrics.get("mypy_errors", 0))
+                    tests_failed = int(metrics.get("tests_failed", 0))
+                    coverage_pct = float(metrics.get("coverage_pct", 0.0))
+                    cov_str = f"{coverage_pct:.1f}%"
+                    click.echo(
+                        f"  {domain:<16} {mypy_errors:>6}   {tests_failed:>12}   {cov_str:>8}"
+                    )
+        except (ValueError, OSError, KeyError):
+            pass
 
 
 def _default_docs_dir(psp: str, cfg: "GraceConfig | None" = None) -> Path:
@@ -237,7 +266,14 @@ def _resolved_tests_dir(cfg: "GraceConfig | None" = None) -> Path | None:
     default=None,
     help="Path to grace config.yaml; defaults to ~/.grace/config.yaml.",
 )
-def generate(psp: str, source: str | None, output: Path | None, config: Path | None) -> None:
+@click.option(
+    "--domain",
+    "domain",
+    type=click.Choice(["orders", "subscriptions", "all"]),
+    default="all",
+    help="Which capability domain to (re)generate.",
+)
+def generate(psp: str, source: str | None, output: Path | None, config: Path | None, domain: str) -> None:
     """Generate a connector package for PSP from the given source."""
     cfg = load_config(config_path=config)
 
@@ -280,6 +316,7 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
             source_version=source,
             repo_root=_repo_root(),
             tests_dir=tests_dir,
+            domain=domain,
         )
         runner = ClaudeCodeRunner(
             cli_path=cfg.claude_code.cli_path, timeout_s=cfg.claude_code.timeout_s
@@ -329,20 +366,33 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
     help="URL or local path of an llms.txt file listing the PSP's doc pages.",
 )
 @click.option(
+    "--domain",
+    "domain",
+    type=click.Choice(["orders", "subscriptions", "all"]),
+    default="all",
+    help=(
+        "Which capability domain's docs to fetch. "
+        "Selects the appropriate URL globs for orders, subscriptions, or both. "
+        "Bypassed when --include/--exclude are provided as manual overrides."
+    ),
+)
+@click.option(
     "--include",
     "include",
     multiple=True,
     help=(
         "Glob to keep (matched against URL path). Repeat for OR. "
-        "Defaults are tuned for hosted-checkout PSPs (orders/payments/refunds/"
-        "webhooks/auth/errors). Out-of-scope sections are excluded by default."
+        "Bypasses the --domain preset when provided."
     ),
 )
 @click.option(
     "--exclude",
     "exclude",
     multiple=True,
-    help="Glob to drop (matched against URL path). Repeat for OR.",
+    help=(
+        "Glob to drop (matched against URL path). Repeat for OR. "
+        "Bypasses the --domain preset when provided."
+    ),
 )
 @click.option(
     "--output",
@@ -352,12 +402,20 @@ def generate(psp: str, source: str | None, output: Path | None, config: Path | N
     help="Output directory. Defaults to <repo>/<paths.docs_dir>/<psp>/ "
     "(set via `grace config set paths.docs_dir <path>`).",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite an existing connector_docs/<psp>.md scaffold.",
+)
 def fetch_docs_cmd(
     psp: str,
     source: str,
+    domain: str,
     include: tuple[str, ...],
     exclude: tuple[str, ...],
     output: Path | None,
+    force: bool,
 ) -> None:
     """Fetch a PSP's docs from its llms.txt into connector_docs/<psp>/."""
     cfg = load_config()
@@ -370,8 +428,10 @@ def fetch_docs_cmd(
             psp_name=psp,
             source=source,
             output_dir=out,
+            domain=domain,
             include=list(include) if include else None,
             exclude=list(exclude) if exclude else None,
+            force=force,
         )
     except GraceError as e:
         raise _click_error_from_grace(e) from e

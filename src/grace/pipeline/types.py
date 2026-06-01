@@ -42,6 +42,9 @@ class GenerationContext:
     run. None keeps the canonical in-package layout. Resolved from
     `paths.tests_dir` in the consumer config — see `PathsConfig`."""
 
+    domain: str = "all"
+    """orders | subscriptions | all — scopes the docs bundle + which mixin(s) to (re)generate."""
+
 
 @dataclass(frozen=True)
 class GenerationResult:

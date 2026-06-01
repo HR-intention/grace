@@ -10,6 +10,8 @@ from grace.quality_rubric import (
     score_rubric,
 )
 
+FX = Path(__file__).parent / "fixtures" / "connectors"
+
 
 def _ctx(tmp_path: Path) -> GenerationContext:
     rb = tmp_path / "rb.md"
@@ -40,67 +42,149 @@ def _write_marker(p: Path, psp: str = "demo") -> None:
 
 
 def _scaffold_full_pkg(out: Path) -> None:
+    """Scaffold a domain-modular 0.2.0 connector package.
+
+    Layout mirrors §3.2: root connector.py/webhooks.py/__init__.py; core/
+    base.py + auth.py + status.py + models.py; orders/ and subscriptions/
+    each with connector.py / status_map.py / webhooks.py.  All files carry
+    the §4 marker.
+
+    Updated for T14:
+    - core/auth.py carries Maskable (relocated from root auth.py).
+    - root webhooks.py carries WEBHOOK_SIGNATURE_FAILED + build_webhook_handlers.
+    - orders/status_map.py references PaymentAttemptStatus + PaymentFailureCode.
+    - subscriptions/status_map.py references MandateStatus + WebhookEventType.
+    - Root auth.py interim shim removed (pii scorer now reads core/auth.py).
+    """
+    # --- root files ---
     out.mkdir(parents=True, exist_ok=True)
-    for name in ["__init__.py", "connector.py", "auth.py", "models.py", "status_map.py"]:
-        f = out / name
-        _write_marker(f)
-        if name == "connector.py":
-            f.write_text(
-                f.read_text()
-                + "from lens.connector import Connector\n"
-                + "from lens.common import ConnectorError, ConnectorErrorReason\n"
-                + "import httpx\n"
-                + "class Demo(Connector):\n"
-                + "    @property\n"
-                + "    def name(self): return 'demo'\n"
-                + "    @property\n"
-                + "    def base_url(self): return 'https://api.example.com'\n"
-                + "    @property\n"
-                + "    def supported_methods(self): return set()\n"
-                + "    @property\n"
-                + "    def supports_idempotency_key(self): return True\n"
-                + "    async def create_order(self, request): ...\n"
-                + "    async def sync_payment(self, request): ...\n"
-                + "    async def refund(self, request): ...\n"
-                + "    async def sync_refund(self, request): ...\n"
-                + "    async def handle_webhook(self, raw_payload, headers):\n"
-                + "        try:\n"
-                + "            ...\n"
-                + "        except httpx.HTTPStatusError:\n"
-                + "            raise ConnectorError(reason=ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED)\n"
-                + "    async def close(self): ...\n"
-            )
-        elif name == "__init__.py":
-            f.write_text(
-                f.read_text()
-                + 'requires_lens = "^0.1"\n'
-                + "from .connector import Demo\n"
-                + "from lens.factory import ConnectorFactory\n"
-                + 'ConnectorFactory.register("demo", Demo)\n'
-            )
-        elif name == "auth.py":
-            f.write_text(
-                f.read_text()
-                + "from lens.common import Maskable\n"
-                + "def sign(secret: Maskable[str], payload: bytes) -> str: ...\n"
-            )
-        elif name == "status_map.py":
-            f.write_text(
-                f.read_text()
-                + "from lens.enums import PaymentAttemptStatus, PaymentFailureCode\n"
-                + "STATUS_MAP = {}\n"
-            )
-    tests = out / "tests"
-    tests.mkdir()
-    for t in [
-        "test_create_order.py",
-        "test_sync_payment.py",
-        "test_refund.py",
-        "test_sync_refund.py",
-        "test_webhook.py",
+
+    init_py = out / "__init__.py"
+    _write_marker(init_py)
+    init_py.write_text(
+        init_py.read_text()
+        + 'requires_lens = "^0.2"\n'
+        + "from .connector import DemoConnector\n"
+        + "from .webhooks import build_webhook_handlers\n"
+        + "from lens.factory import ConnectorFactory\n"
+        + 'ConnectorFactory.register("demo", DemoConnector)\n'
+        + 'ConnectorFactory.register_webhook("demo", build_webhook_handlers)\n'
+    )
+
+    connector_py = out / "connector.py"
+    _write_marker(connector_py)
+    connector_py.write_text(
+        connector_py.read_text()
+        + "from lens.common import ConnectorError, ConnectorErrorReason\n"
+        + "from .orders.connector import DemoOrders\n"
+        + "from .subscriptions.connector import DemoSubscriptions\n"
+        + "class DemoConnector(DemoOrders, DemoSubscriptions):\n"
+        + "    pass\n"
+    )
+
+    # Root webhooks.py: build_webhook_handlers + WEBHOOK_SIGNATURE_FAILED reference
+    # (error-handling scorer v2 checks this file for the signature-failure pattern).
+    webhooks_py = out / "webhooks.py"
+    _write_marker(webhooks_py)
+    webhooks_py.write_text(
+        webhooks_py.read_text()
+        + "from lens.common import WEBHOOK_SIGNATURE_FAILED, ConnectorError\n"
+        + "def build_webhook_handlers(config: object) -> object: ...\n"
+    )
+
+    # --- core/ ---
+    core_dir = out / "core"
+    core_dir.mkdir()
+    for name, content in [
+        ("__init__.py", ""),
+        (
+            "base.py",
+            "from lens.connector import Connector\n"
+            "class _DemoBase(Connector):\n"
+            "    def __init__(self, config: object) -> None: ...\n"
+            "    @property\n"
+            "    def name(self) -> str: return 'demo'\n"
+            "    @property\n"
+            "    def base_url(self) -> str: return 'https://api.example.com'\n"
+            "    async def close(self) -> None: ...\n",
+        ),
+        # core/auth.py carries Maskable credentials (pii scorer reads this location).
+        ("auth.py", "from lens.common import Maskable\nclass DemoCreds:\n    api_key: Maskable[str]\n"),
+        ("status.py", ""),
+        ("models.py", ""),
     ]:
-        f = tests / t
+        f = core_dir / name
         _write_marker(f)
+        f.write_text(f.read_text() + content)
+
+    # --- orders/ ---
+    orders_dir = out / "orders"
+    orders_dir.mkdir()
+    for name, content in [
+        ("__init__.py", ""),
+        (
+            "connector.py",
+            "from lens.payments_connector import PaymentsConnector\n"
+            "from ..core.base import _DemoBase\n"
+            "class DemoOrders(_DemoBase, PaymentsConnector):\n"
+            "    @property\n"
+            "    def supported_methods(self): return set()\n"
+            "    @property\n"
+            "    def supports_idempotency_key(self): return True\n"
+            "    async def create_order(self, r): ...\n"
+            "    async def sync_payment(self, r): ...\n"
+            "    async def refund(self, r): ...\n"
+            "    async def sync_refund(self, r): ...\n",
+        ),
+        # orders/status_map.py must reference PaymentAttemptStatus + PaymentFailureCode.
+        (
+            "status_map.py",
+            "from lens.enums import PaymentAttemptStatus, PaymentFailureCode\n"
+            "STATUS_MAP: dict[str, PaymentAttemptStatus] = {}\n"
+            "FAILURE_MAP: dict[str, PaymentFailureCode] = {}\n",
+        ),
+        ("webhooks.py", ""),
+    ]:
+        f = orders_dir / name
+        _write_marker(f)
+        f.write_text(f.read_text() + content)
+
+    # --- subscriptions/ ---
+    subs_dir = out / "subscriptions"
+    subs_dir.mkdir()
+    for name, content in [
+        ("__init__.py", ""),
+        (
+            "connector.py",
+            "from lens.mandate_connector import MandateConnector\n"
+            "from ..core.base import _DemoBase\n"
+            "class DemoSubscriptions(_DemoBase, MandateConnector):\n"
+            "    @property\n"
+            "    def supported_mandate_rails(self): return set()\n"
+            "    @property\n"
+            "    def supports_pause(self): return False\n"
+            "    @property\n"
+            "    def supported_intervals(self): return set()\n"
+            "    @property\n"
+            "    def max_mandate_amount(self): return 0\n"
+            "    async def create_subscription(self, r): ...\n"
+            "    async def sync_subscription(self, r): ...\n"
+            "    async def cancel_subscription(self, r): ...\n"
+            "    async def pause_subscription(self, r): ...\n"
+            "    async def resume_subscription(self, r): ...\n",
+        ),
+        # subscriptions/status_map.py must reference MandateStatus + WebhookEventType.
+        (
+            "status_map.py",
+            "from lens.enums import MandateStatus, WebhookEventType\n"
+            "STATUS_MAP: dict[str, MandateStatus] = {}\n"
+            "EVENT_MAP: dict[str, WebhookEventType] = {}\n",
+        ),
+        ("webhooks.py", ""),
+    ]:
+        f = subs_dir / name
+        _write_marker(f)
+        f.write_text(f.read_text() + content)
 
 
 def test_rubric_full_score_when_everything_is_clean(tmp_path: Path) -> None:
@@ -119,8 +203,8 @@ def test_rubric_full_score_when_everything_is_clean(tmp_path: Path) -> None:
 def test_rubric_marker_dimension_fails_when_marker_missing(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     _scaffold_full_pkg(ctx.output_dir)
-    # break one file's marker
-    (ctx.output_dir / "auth.py").write_text("def x(): ...\n")
+    # break one file's marker — the scorer finds the file but sees no §4 header
+    (ctx.output_dir / "core" / "auth.py").write_text("def x(): ...\n")
     report = score_rubric(
         ctx=ctx,
         output_dir=ctx.output_dir,
@@ -131,27 +215,13 @@ def test_rubric_marker_dimension_fails_when_marker_missing(tmp_path: Path) -> No
     assert marker_dim.score == 0
 
 
-def test_rubric_public_surface_finds_relocated_tests(tmp_path: Path) -> None:
-    """When `paths.tests_dir` is configured, generated tests live at
-    `<tests_dir>/<psp>/` instead of `<output_dir>/tests/`. The rubric must
-    look at the relocated location, else every relocated run flags 5
-    missing test files (−20 score) on an otherwise-perfect package."""
-    from dataclasses import replace
-
+def test_rubric_public_surface_full_score_via_fixture(tmp_path: Path) -> None:
+    """The compliant fixture passes the domain-modular public-surface check
+    with no deductions. Score must equal max (20)."""
     ctx = _ctx(tmp_path)
-    _scaffold_full_pkg(ctx.output_dir)
-
-    # Mimic _relocate_tests: move `<output_dir>/tests/` to `<tests_dir>/<psp>/`.
-    relocated_root = tmp_path / "relocated_tests" / "connectors"
-    relocated_root.mkdir(parents=True)
-    import shutil
-    shutil.move(str(ctx.output_dir / "tests"), str(relocated_root / "demo"))
-
-    ctx_with_relocation = replace(ctx, tests_dir=relocated_root)
-
     report = score_rubric(
-        ctx=ctx_with_relocation,
-        output_dir=ctx_with_relocation.output_dir,
+        ctx=ctx,
+        output_dir=FX / "compliant",
         mypy_report=MypyReport(passed=True, stdout="", stderr=""),
         pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
     )
@@ -159,44 +229,35 @@ def test_rubric_public_surface_finds_relocated_tests(tmp_path: Path) -> None:
     assert surface_dim.score == surface_dim.max, surface_dim.detail
 
 
-def test_rubric_public_surface_flags_missing_relocated_tests(tmp_path: Path) -> None:
-    """If tests are missing from the relocated location too, surface fails."""
-    from dataclasses import replace
-
+def test_rubric_public_surface_orders_only_not_penalized(tmp_path: Path) -> None:
+    """A payments-only PSP (no subscriptions/ dir) must not be docked for absent
+    mandate methods — absent domains are not penalized (Cross-Cutting C1)."""
     ctx = _ctx(tmp_path)
-    _scaffold_full_pkg(ctx.output_dir)
-    # Move tests but only carry over 2 of the 5 required files.
-    relocated_root = tmp_path / "relocated_tests" / "connectors"
-    dest = relocated_root / "demo"
-    dest.mkdir(parents=True)
-    for keep in ("test_create_order.py", "test_sync_payment.py"):
-        (dest / keep).write_text("def test_x(): pass\n")
-    import shutil
-    shutil.rmtree(ctx.output_dir / "tests")
-
-    ctx_with_relocation = replace(ctx, tests_dir=relocated_root)
     report = score_rubric(
-        ctx=ctx_with_relocation,
-        output_dir=ctx_with_relocation.output_dir,
+        ctx=ctx,
+        output_dir=FX / "orders_only",
         mypy_report=MypyReport(passed=True, stdout="", stderr=""),
         pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
     )
     surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
-    assert surface_dim.score < surface_dim.max
-    assert "test_refund.py" in surface_dim.detail
+    assert surface_dim.score == surface_dim.max, surface_dim.detail
 
 
-def test_rubric_public_surface_fails_when_class_missing(tmp_path: Path) -> None:
+def test_rubric_public_surface_docks_missing_register(tmp_path: Path) -> None:
+    """When __init__.py omits ConnectorFactory.register the scorer docks points."""
     ctx = _ctx(tmp_path)
     _scaffold_full_pkg(ctx.output_dir)
-    (ctx.output_dir / "connector.py").write_text(
+    # Overwrite __init__ to remove the register call.
+    init_py = ctx.output_dir / "__init__.py"
+    init_py.write_text(
         "# ──────────────────────────────────────────────────────────────────────\n"
         "#  DO NOT EDIT — autogenerated by Grace.\n"
         "#  Source: demo x\n"
         "#  Generated: 2026-05-20T12:00:00Z\n"
         "#  Generator: grace 0.1.0\n"
         "#  Regenerate: grace generate demo --from x\n"
-        "# ──────────────────────────────────────────────────────────────────────\n"
+        "# ──────────────────────────────────────────────────────────────────────\n\n"
+        "requires_lens = 'demo'\n"
         "x = 1\n"
     )
     report = score_rubric(
@@ -207,6 +268,21 @@ def test_rubric_public_surface_fails_when_class_missing(tmp_path: Path) -> None:
     )
     surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
     assert surface_dim.score < surface_dim.max
+
+
+def test_rubric_public_surface_docks_missing_domain_method(tmp_path: Path) -> None:
+    """When subscriptions/connector.py omits a required lifecycle method the
+    scorer docks points and mentions the missing method name in detail."""
+    ctx = _ctx(tmp_path)
+    report = score_rubric(
+        ctx=ctx,
+        output_dir=FX / "missing_mandate_method",
+        mypy_report=MypyReport(passed=True, stdout="", stderr=""),
+        pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
+    )
+    surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
+    assert surface_dim.score < surface_dim.max
+    assert "cancel_subscription" in surface_dim.detail
 
 
 def test_parse_mypy_findings_splits_per_line_and_drops_summary() -> None:
@@ -278,51 +354,23 @@ def test_rubric_type_correctness_carries_findings(tmp_path: Path) -> None:
     assert type_entry["findings"] == type_dim.findings
 
 
-def test_rubric_public_surface_fails_when_properties_missing(tmp_path: Path) -> None:
-    """Missing @property declarations are caught at gate time, not deferred to
-    a pytest-collection blowup."""
-    ctx = _ctx(tmp_path)
-    _scaffold_full_pkg(ctx.output_dir)
-    # Strip the @property declarations out — class becomes abstract.
-    (ctx.output_dir / "connector.py").write_text(
-        "# ──────────────────────────────────────────────────────────────────────\n"
-        "#  DO NOT EDIT — autogenerated by Grace.\n"
-        "#  Source: demo x\n"
-        "#  Generated: 2026-05-20T12:00:00Z\n"
-        "#  Generator: grace 0.1.0\n"
-        "#  Regenerate: grace generate demo --from x\n"
-        "# ──────────────────────────────────────────────────────────────────────\n\n"
-        "from lens.connector import Connector\n"
-        "from lens.common import ConnectorError, ConnectorErrorReason\n"
-        "import httpx\n"
-        "class Demo(Connector):\n"
-        "    async def create_order(self, request): ...\n"
-        "    async def sync_payment(self, request): ...\n"
-        "    async def refund(self, request): ...\n"
-        "    async def sync_refund(self, request): ...\n"
-        "    async def handle_webhook(self, raw_payload, headers):\n"
-        "        raise ConnectorError(reason=ConnectorErrorReason.WEBHOOK_SIGNATURE_FAILED)\n"
-        "    async def close(self): ...\n"
-    )
-    report = score_rubric(
-        ctx=ctx,
-        output_dir=ctx.output_dir,
-        mypy_report=MypyReport(passed=True, stdout="", stderr=""),
-        pytest_report=PytestReport(passed=True, coverage_pct=95.0, stdout="", stderr=""),
-    )
-    surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
-    assert surface_dim.score < surface_dim.max
-    assert "missing @property" in surface_dim.detail
-
-
 def test_rubric_passes_with_55_when_mypy_and_coverage_fail(tmp_path: Path) -> None:
+    """Even when mypy (−20) and coverage (partial −N) fail, the minimum floor
+    from marker + surface + error + pii must be at least 35 (marker 5 + error
+    handling 20 + pii 10 = 35 baseline if surface is 0; but surface passes a
+    well-formed scaffold so total is higher).  Check the scaffold yields full
+    surface so the floor is 55: marker 5 + surface 20 + error 20 + pii 10."""
     ctx = _ctx(tmp_path)
     _scaffold_full_pkg(ctx.output_dir)
     report = score_rubric(
         ctx=ctx,
         output_dir=ctx.output_dir,
-        mypy_report=MypyReport(passed=False, stdout="", stderr=""),    # -20
-        pytest_report=PytestReport(passed=True, coverage_pct=50.0, stdout="", stderr=""),  # -25
+        mypy_report=MypyReport(passed=False, stdout="", stderr=""),   # −20
+        pytest_report=PytestReport(passed=True, coverage_pct=50.0, stdout="", stderr=""),  # partial
     )
     assert report.total < 100
-    assert report.total >= 55  # marker 5 + surface 20 + error 20 + pii 10 = 55 worst case
+    # Surface + marker + error-handling + pii dimensions still pass for a
+    # well-formed scaffold: 20 + 5 + 20 + 10 = 55.
+    surface_dim = next(d for d in report.dimensions if d.name == "public_surface")
+    assert surface_dim.score == surface_dim.max, surface_dim.detail
+    assert report.total >= 55

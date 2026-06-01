@@ -225,6 +225,24 @@ def run_gates_blocking(*, ctx: GenerationContext, result: GenerationResult) -> N
     }
     if run_stats:
         report_payload["run"] = run_stats
+    # --- Per-domain breakdown (additive, does not affect gate pass/fail) ---
+    from grace.pipeline.domain_breakdown import build_domain_breakdown
+
+    _cov_data: dict[str, object] | None = None
+    if coverage_json_path.is_file():
+        try:
+            _cov_data = _json.loads(coverage_json_path.read_text())
+        except (ValueError, OSError):
+            _cov_data = None
+
+    by_domain = build_domain_breakdown(
+        mypy_stdout=mypy_report.stdout,
+        pytest_stdout=pytest_report.stdout,
+        coverage=_cov_data,
+    )
+    if by_domain:
+        report_payload["by_domain"] = by_domain
+
     quality_report_path.write_text(_json.dumps(report_payload, indent=2))
 
     failures: list[str] = []

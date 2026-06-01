@@ -1,16 +1,24 @@
-# v1 flow patterns
+# Flow patterns
 
 This directory holds the per-flow pattern files Grace ships to Claude Code as context. The entry point for the full Python rulebook is `../../python/README.md` — read it first.
 
-## Patterns kept for v1
-
-The four PSP flows + the webhook:
+## Payment domain patterns (`orders/`)
 
 - **`pattern_createorder.md`** — `create_order` (hosted-checkout session creation).
 - **`pattern_psync.md`** — `sync_payment` (poll for OrderStatus + list of PaymentAttempts).
 - **`pattern_refund.md`** — `refund` (initiate full or partial refund).
 - **`pattern_rsync.md`** — `sync_refund` (poll for refund status).
-- **`pattern_IncomingWebhook_flow.md`** — `handle_webhook` (verify + parse).
+
+## Mandate / subscription domain patterns (`subscriptions/`)
+
+- **`pattern_create_subscription.md`** — `create_subscription` (inline mandate creation + customer approval handle).
+- **`pattern_sync_subscription.md`** — `sync_subscription` (poll for MandateStatus + last debit outcome).
+- **`pattern_manage_mandate.md`** — `cancel_subscription` / `pause_subscription` / `resume_subscription` (all share `ManageMandateRequest`; resume = PSP ACTIVATE).
+- **`pattern_mandate_webhook.md`** — `_parse_mandate_webhook` (domain parser for mandate events; router-dispatched).
+
+## Shared webhook router pattern
+
+- **`pattern_IncomingWebhook_flow.md`** — `build_webhook_handlers` (shared `WebhookRouter` integration: verify once via HMAC, classify by `WebhookFamily`, dispatch to domain parsers; **no `handle_webhook` connector method**).
 
 Each pattern documents: the domain types involved, the method signature, an implementation skeleton, the errors to surface, and the required test cases.
 
