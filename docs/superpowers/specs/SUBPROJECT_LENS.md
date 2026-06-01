@@ -3,7 +3,7 @@
 **Inherits from**: `ORBIT_CONSTITUTION.md`. Conflicts resolve in favor of the constitution.
 **Owner**: TBD per implementing agent.
 **Location**: `/Users/sarthak/PycharmProjects/symplora/sylibs/packages/lens/` — package in the `sylibs` monorepo. Distribution name and import name are both `lens`; published to SyPI.
-**Status**: v0.6 / lens 0.2.0 — Connector version gate removed; periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
+**Status**: v0.7 / lens 0.2.1 — `CreateSubscriptionRequest` exposes optional Cashfree authorization-amount fields; connector version gate removed; periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
 
 ---
 
@@ -433,6 +433,8 @@ class CreateSubscriptionRequest(MandateRequestCommon):
     customer_contact: CustomerContact
     amount: Amount
     max_amount: Amount
+    authorization_amount: Amount | None = None     # Cashfree verification charge (optional)
+    authorization_amount_refund: bool = True        # auto-refund the verification charge
     interval_type: MandateIntervalType
     interval_count: int = 1
     first_charge_at: datetime | None = None
