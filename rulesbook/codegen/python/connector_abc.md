@@ -212,3 +212,55 @@ The composed class has zero leftover abstract methods; it passes `ConnectorFacto
      `.expose()` in `verify_signature`.
    Calling `.expose()` on a `None` value raises `AttributeError` at runtime and crashes
    `mypy --strict` type checking.
+
+---
+
+## Error mapping (shared `_map_http_error` + `_extract_psp_error`) — MANDATORY, every connector
+
+Each domain `connector.py` defines a module-level `_map_http_error`, used by every flow's
+`except httpx.HTTPStatusError` arm. It MUST surface the PSP's own error code/message — never
+swallow the PSP's real reason. The status→reason mapping is unchanged; the requirement is that
+`psp_code`/`psp_message` are set on **every** returned `ConnectorError`.
+
+```python
+def _extract_psp_error(e: httpx.HTTPStatusError) -> tuple[str | None, str | None]:
+    """Pull the PSP's (code, message) from an error response body, if present."""
+    try:
+        body = e.response.json()
+    except (ValueError, TypeError):
+        return None, None
+    if not isinstance(body, dict):
+        return None, None
+    code = body.get("code")
+    message = body.get("message")
+    return (
+        code if isinstance(code, str) else None,
+        message if isinstance(message, str) else None,
+    )
+
+
+def _map_http_error(e: httpx.HTTPStatusError) -> ConnectorError:
+    """Map an HTTP status error to a ConnectorError, preserving the PSP code/message."""
+    status = e.response.status_code
+    psp_code, psp_message = _extract_psp_error(e)
+    reason_by_status: dict[int, ConnectorErrorReason] = {
+        401: ConnectorErrorReason.AUTHENTICATION_FAILED,
+        403: ConnectorErrorReason.AUTHORIZATION_FAILED,
+        404: ConnectorErrorReason.ORDER_NOT_FOUND,
+        409: ConnectorErrorReason.INVALID_ORDER_STATE,
+        429: ConnectorErrorReason.RATE_LIMITED,
+        400: ConnectorErrorReason.INVALID_REQUEST,
+        422: ConnectorErrorReason.INVALID_REQUEST,
+    }
+    reason = reason_by_status.get(status, ConnectorErrorReason.PSP_UNAVAILABLE)
+    return ConnectorError(reason=reason, psp_code=psp_code, psp_message=psp_message)
+```
+
+- `ConnectorError` accepts `psp_code: str | None` and `psp_message: str | None` — set them
+  whenever a PSP detail is available (also on the `except ValidationError` arm:
+  `ConnectorError(reason=INTERNAL, psp_message=str(e))`).
+- **Adapt `_extract_psp_error` to the PSP's documented error-body shape.** `{code, message}`
+  is the common case; if the PSP nests it (e.g. `{"error": {...}}`) read the documented path —
+  see `connector_docs/<psp>.md`.
+- Without this, connectors swallow the PSP's real reason (e.g. Cashfree's
+  `auth_amount_invalid_for_action`), making live failures undiagnosable.

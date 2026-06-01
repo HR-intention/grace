@@ -44,8 +44,11 @@ tests/
 
 ### `test_create_order.py`
 - **Happy path**: PSP returns 200 with `psp_order_id` + `payment_link`; assert
-  `CreateOrderResponse` round-trips.
-- **4xx path**: PSP returns 400; assert `ConnectorError(reason=INVALID_REQUEST)`.
+  `CreateOrderResponse` round-trips. **Assert `psp_order_id == request.order_id`** (the merchant id
+  orbit supplied), NOT the PSP-native id — `sync_payment` must `GET` by an id the PSP endpoint is
+  keyed on. (Per-PSP: see `connector_docs/<psp>.md`; for Cashfree it is the merchant `order_id`, not `cf_order_id`.)
+- **4xx path**: PSP returns 400 with a `{code, message}` body; assert
+  `ConnectorError(reason=INVALID_REQUEST)` **and `err.psp_code` / `err.psp_message` populated from the body**.
 - **5xx path**: PSP returns 503; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 - **Network-error path**: `MockTransport` raises `httpx.ConnectError`; assert
   `ConnectorError(reason=PSP_UNAVAILABLE)`.
@@ -80,8 +83,15 @@ tests/
   `approval.type == "UPI_COLLECT"` (or `"UPI_INTENT"`); assert `CreateSubscriptionResponse`
   round-trips.
 - **Happy path (CARD_EMANDATE)**: assert `approval.type == "REDIRECT"`.
-- **4xx path**: 400 body; assert `ConnectorError(reason=INVALID_REQUEST)`.
+- **4xx path**: 400 with a `{code, message}` body (e.g. `auth_amount_invalid_for_action`); assert
+  `ConnectorError(reason=INVALID_REQUEST)` **and `err.psp_code` / `err.psp_message` from the body**.
 - **5xx path**: 503; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **Authorization amount is positive (never 0)**: with **no** `authorization_amount` on the request,
+  assert the wire `authorization_details.authorization_amount == 1.0` (the ₹1.00 default) and
+  `authorization_details.authorization_amount_refund == True`. (A `0` authorization amount is a
+  blocker — the PSP rejects it.)
+- **Explicit authorization amount forwarded**: pass `authorization_amount=Amount(minor_units=50000, currency=Currency.INR)`
+  and `authorization_amount_refund=False`; assert the wire request carries `500.0` and `False`.
 - **All `CreateSubscriptionRequest` fields forwarded**: `customer_contact.email`,
   `customer_contact.phone`, `first_charge_at`, `description`, `return_url`, `upi_vpa`,
   `idempotency_key` — assert the mock received them in the wire request.
@@ -270,6 +280,12 @@ least one test per `ConnectorError` reason the flow can raise:
 
 Use `httpx.MockTransport` returning those status codes. The `_map_http_error` helper covers
 most 4xx branches; test them parametrically (minimum: 400, 401, 403, 404, 409, 429, one 5xx).
+
+**Surface the PSP code/message.** `_map_http_error` parses the PSP error body via
+`_extract_psp_error` and sets `psp_code`/`psp_message` on every mapped `ConnectorError` (see
+`connector_abc.md` → "Error mapping"). At least one 4xx test per connector must assert these are
+populated — e.g. a 400 whose JSON body has `code = auth_amount_invalid_for_action` yields
+`err.psp_code == 'auth_amount_invalid_for_action'` and a non-empty `err.psp_message`.
 
 ### Required tests for shared `core/` modules
 

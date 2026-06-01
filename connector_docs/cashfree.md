@@ -118,5 +118,29 @@ Maps `CreateSubscriptionRequest` lens fields to Cashfree Subscriptions API field
 | `return_url` | `subscription_meta.return_url` | |
 | (notification) | `subscription_meta.notification_channel = [SMS, EMAIL]` | always set both |
 | `rail` | `authorization_details.payment_methods` | via rail → payment_methods table above |
+| `authorization_amount` (`Amount`, optional) | `authorization_details.authorization_amount` (major units) | **Positive, never `0`** — Cashfree rejects `0` with `auth_amount_invalid_for_action`. Default ₹1.00 (`minor_units=100`) when absent. |
+| `authorization_amount_refund` (`bool`, default `True`) | `authorization_details.authorization_amount_refund` | Refund the verification charge. |
 | `idempotency_key` | Cashfree idempotency token header (`x-idempotency-key`) | |
 | `ManageMandateRequest.effective_at` (resume) | `action_details.next_scheduled_time` | resume = ACTIVATE verb |
+
+**Authorization amount must be positive.** Cashfree rejects `authorization_amount=0` with
+`auth_amount_invalid_for_action`. `create_subscription` sources it from `request.authorization_amount`
+(major units = `minor_units / 100`), defaulting to a small positive **₹1.00** (`minor_units=100`) when the
+caller omits it, and emits `authorization_amount_refund` from `request.authorization_amount_refund`
+(default `True`) so the verification charge is refunded. Define the default as a module constant
+`_DEFAULT_AUTH_AMOUNT = Amount(minor_units=100, currency=Currency.INR)`. Never emit `0`.
+
+---
+
+## Orders — `psp_order_id` normalization
+
+`create_order` must return the **merchant `order_id`** (the id orbit supplied) as `psp_order_id` —
+**not** Cashfree's `cf_order_id`:
+
+```python
+psp_order_id=str(psp_resp.order_id or request.order_id),   # NOT cf_order_id
+```
+
+Cashfree's `GET /pg/orders/{id}` (used by `sync_payment`) is keyed on the **merchant `order_id`**, so
+`create_order` and `sync_payment` must use the same identifier. Preferring `cf_order_id` makes
+`sync_payment` 404 (`ORDER_NOT_FOUND`).
