@@ -77,7 +77,6 @@ async def run_pipeline(
     write_compose_surface(
         result.output_dir,
         psp_name=ctx.psp_name,
-        lens_version=ctx.lens_version_constraint,
     )
 
     generated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

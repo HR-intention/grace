@@ -183,8 +183,6 @@ from lens.factory import ConnectorFactory
 from <psp>.connector import <Psp>Connector
 from <psp>.webhooks import build_webhook_handlers
 
-requires_lens = "^0.2"
-
 ConnectorFactory.register("<psp>", <Psp>Connector)
 ConnectorFactory.register_webhook("<psp>", build_webhook_handlers)
 ```

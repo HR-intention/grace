@@ -89,7 +89,7 @@ quality:
   min_rubric_score: 60
 
 lens:
-  version_constraint: "^0.2"  # written into the generated __init__.py as requires_lens
+  version_constraint: "^0.2"  # selects which lens ABCs to target; not emitted into generated code (v0.6)
 ```
 
 CLI flags override config. **No API keys live here.**

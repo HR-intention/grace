@@ -60,7 +60,7 @@ Then read the per-flow patterns under `../guides/patterns/`:
   a bare `Connector` subclass.
 - **Both registrations in `__init__.py`.** `ConnectorFactory.register(...)` and
   `ConnectorFactory.register_webhook(...)`.
-- **`requires_lens = "^0.2"` at module scope** in `__init__.py`.
+- **No `requires_lens`** — the connector version gate was removed in constitution v0.6.
 - **Webhook is the shared router** (`build_webhook_handlers` + `WebhookRouter`), not a
   connector method.
 - **`MandateConnector` is singular.** `MandatesConnector` does not exist.

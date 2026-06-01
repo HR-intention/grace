@@ -36,7 +36,7 @@ composed into a single registered `<Psp>Connector`, plus a refreshed
 
 ```
 lens/connectors/<psp>/
-  __init__.py            # requires_lens = "^0.2"; register + register_webhook
+  __init__.py            # register + register_webhook
   connector.py           # class <Psp>Connector(<Psp>Orders, <Psp>Subscriptions)
   webhooks.py            # build_webhook_handlers(config) -> WebhookHandlers
   core/
@@ -169,7 +169,7 @@ Confirm all of the following:
 **compose surface (Grace-owned)**
 - [ ] `connector.py` (root): `class <Psp>Connector(<Psp>Orders, <Psp>Subscriptions):` — no methods, pure composition; or just `(<Psp>Orders, _<Psp>Base)` for payments-only.
 - [ ] `webhooks.py` (root): exports `build_webhook_handlers(config: ConnectorConfig) -> WebhookHandlers`; no `handle_webhook` method anywhere.
-- [ ] `__init__.py`: declares `requires_lens = "^0.2"` at module scope AND calls **both** `ConnectorFactory.register("<psp>", <Psp>Connector)` AND `ConnectorFactory.register_webhook("<psp>", build_webhook_handlers)`.
+- [ ] `__init__.py`: calls **both** `ConnectorFactory.register("<psp>", <Psp>Connector)` AND `ConnectorFactory.register_webhook("<psp>", build_webhook_handlers)` at module scope. No `requires_lens` (version gate removed in constitution v0.6).
 
 **core/**
 - [ ] `core/base.py`: `class _<Psp>Base(Connector)` — owns `name`, `base_url`, `close()`, `__init__(config)`, and the ONE `httpx.AsyncClient`.

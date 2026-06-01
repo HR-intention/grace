@@ -5,8 +5,7 @@ missing files cost rubric points.
 
 ```
 connectors/<psp>/
-  __init__.py            # requires_lens = "^0.2"
-                         # ConnectorFactory.register("<psp>", <Psp>Connector)
+  __init__.py            # ConnectorFactory.register("<psp>", <Psp>Connector)
                          # ConnectorFactory.register_webhook("<psp>", build_webhook_handlers)
   connector.py           # class <Psp>Connector(<Psp>Orders, <Psp>Subscriptions): ...
   webhooks.py            # build_webhook_handlers(config) -> WebhookHandlers
@@ -32,8 +31,7 @@ connectors/<psp>/
 ## What goes in each file
 
 ```
-__init__.py          — Module scope: declare requires_lens = "^0.2".
-                       At the bottom: import and register both:
+__init__.py          — Import and register both (no requires_lens — gate removed in v0.6):
                          ConnectorFactory.register("<psp>", <Psp>Connector)
                          ConnectorFactory.register_webhook("<psp>", build_webhook_handlers)
 
@@ -153,4 +151,4 @@ points. They must still carry the §4 marker.
   from lens.common import Maskable, ConnectorError, ConnectorErrorReason
   ```
 - `MandateConnector` is singular; `MandatesConnector` does not exist (only the facade is plural).
-- `requires_lens = "^0.2"` (not `"^0.1"`). The factory checks this at registration time.
+- No `requires_lens` — the connector version gate was removed in constitution v0.6.

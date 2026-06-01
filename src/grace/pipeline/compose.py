@@ -3,7 +3,7 @@
 Writes three deterministic files at the package root of a generated PSP connector:
   - connector.py  — merged registered class (MRO: domain mixins in order)
   - webhooks.py   — build_webhook_handlers + _classify
-  - __init__.py   — ConnectorFactory registration + requires_lens
+  - __init__.py   — ConnectorFactory registration (register + register_webhook)
 
 This module does NOT stamp the §4 marker — ``orchestrate.run_pipeline`` calls
 ``ensure_marker`` on every emitted .py after the compose step (T11).
@@ -107,13 +107,11 @@ def _render_webhooks(psp_title: str, present: list[str]) -> str:  # noqa: ARG001
     return "\n".join(lines)
 
 
-def _render_init(psp_name: str, psp_title: str, lens_version: str) -> str:
+def _render_init(psp_name: str, psp_title: str) -> str:
     merged = f"{psp_title}Connector"
     return (
         f'"""Package registration for {psp_name}."""\n'
         f"from __future__ import annotations\n"
-        f"\n"
-        f'requires_lens = "{lens_version}"\n'
         f"\n"
         f"from .connector import {merged}\n"
         f"from .webhooks import build_webhook_handlers\n"
@@ -132,7 +130,6 @@ def write_compose_surface(
     pkg: Path,
     *,
     psp_name: str,
-    lens_version: str,
 ) -> None:
     """Write connector.py, webhooks.py, and __init__.py under *pkg*.
 
@@ -140,8 +137,6 @@ def write_compose_surface(
         pkg:           Root directory of the generated PSP package
                        (e.g. ``<output_dir>/cashfree/``).
         psp_name:      Lower-case PSP identifier (e.g. ``"cashfree"``).
-        lens_version:  PEP-440 version constraint to embed in __init__
-                       (e.g. ``"^0.2"``).
 
     Raises:
         GraceError: When no supported domain directories are present under *pkg*.
@@ -157,4 +152,4 @@ def write_compose_surface(
 
     (pkg / "connector.py").write_text(_render_connector(psp_title, present))
     (pkg / "webhooks.py").write_text(_render_webhooks(psp_title, present))
-    (pkg / "__init__.py").write_text(_render_init(psp_name, psp_title, lens_version))
+    (pkg / "__init__.py").write_text(_render_init(psp_name, psp_title))

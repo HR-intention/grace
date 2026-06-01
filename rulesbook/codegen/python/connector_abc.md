@@ -200,8 +200,9 @@ The composed class has zero leftover abstract methods; it passes `ConnectorFacto
    `ConnectorError(reason=...)`. Never let a raw `httpx.HTTPError` escape.
 7. **Introspection methods are plain `def`, not `async def`, not `@property`.** They return
    in-memory constants; no I/O involved.
-8. **`requires_lens = "^0.2"` at module scope in `__init__.py`** and both
-   `ConnectorFactory.register(...)` and `ConnectorFactory.register_webhook(...)` must be called.
+8. **Both `ConnectorFactory.register(...)` and `ConnectorFactory.register_webhook(...)` must be
+   called at module scope in `__init__.py`.** Do **not** declare `requires_lens` — the connector
+   version gate was removed in constitution v0.6.
 9. **Authentication None-guard in `core/auth.py`** — credential optionality:
    - `config.api_key` is `Maskable[str]` — always present, safe to call `.expose()` directly.
    - `config.secret_key` is `Maskable[str] | None` — guard with `assert … is not None` or

@@ -336,7 +336,7 @@ NOT write them; Grace will overwrite them unconditionally anyway:
   webhooks.py  (root)   — build_webhook_handlers(config) -> WebhookHandlers
                           (assembles verify, _classify, _parse_payment_webhook,
                            _parse_mandate_webhook)
-  __init__.py  (root)   — requires_lens + ConnectorFactory.register + register_webhook
+  __init__.py  (root)   — ConnectorFactory.register + register_webhook
 
 The cross-domain _classify(raw: bytes) -> WebhookFamily discriminator is also
 part of Grace's compose surface — write only the per-domain domain parsers

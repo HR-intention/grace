@@ -152,8 +152,6 @@ do `connector.supported_mandate_rails()` with parens — not `connector.supporte
 
 ```python
 # CORRECT — both calls mandatory:
-requires_lens = "^0.2"   # NOT "^0.1"
-
 from <psp>.connector import <Psp>Connector
 from <psp>.webhooks import build_webhook_handlers
 from lens.factory import ConnectorFactory
@@ -168,7 +166,8 @@ ConnectorFactory.register("<psp>", <Psp>Connector)
 # no register_webhook → rubric docks public-surface points
 ```
 
-`requires_lens = "^0.2"` (not `"^0.1"`). The factory checks this at registration time.
+Do **not** declare `requires_lens` — the connector version gate was removed in constitution
+v0.6 (connectors ship bundled inside the `lens` wheel, so nothing reads it).
 
 ## 5b. `__init__` must NOT touch credentials — defer to HTTP call time
 
@@ -405,7 +404,7 @@ Before committing, run:
 ```
 grep -rn 'class.*Connector.*Connector' connector.py   # bare Connector base → 0 matches
 grep 'register_webhook' __init__.py                    # present → ≥ 1 match
-grep 'requires_lens' __init__.py                       # "^0.2" → 1 match
+grep 'requires_lens' __init__.py                       # removed in v0.6 → 0 matches
 grep 'WEBHOOK_SIGNATURE_FAILED' webhooks.py            # present → ≥ 1 match
 grep -E 'Dict\[|List\[|Optional\[|Set\[' **/*.py      # deprecated aliases → 0 matches
 grep 'MandatesConnector' **/*.py                       # typo → 0 matches

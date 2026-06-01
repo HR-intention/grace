@@ -11,13 +11,13 @@ def test_compose_both_domains(tmp_path) -> None:
     pkg = tmp_path / "cashfree"
     _mk_domain(pkg, "orders", "CashfreeOrders")
     _mk_domain(pkg, "subscriptions", "CashfreeSubscriptions")
-    write_compose_surface(pkg, psp_name="cashfree", lens_version="^0.2")
+    write_compose_surface(pkg, psp_name="cashfree")
     conn = (pkg / "connector.py").read_text()
     assert "class CashfreeConnector(CashfreeOrders, CashfreeSubscriptions)" in conn
     init = (pkg / "__init__.py").read_text()
     assert 'ConnectorFactory.register("cashfree", CashfreeConnector)' in init
     assert 'ConnectorFactory.register_webhook("cashfree", build_webhook_handlers)' in init
-    assert 'requires_lens = "^0.2"' in init
+    assert "requires_lens" not in init      # version gate removed in constitution v0.6
     hooks = (pkg / "webhooks.py").read_text()
     assert "parse_mandate=" in hooks and "parse_payment=" in hooks
 
@@ -25,7 +25,7 @@ def test_compose_both_domains(tmp_path) -> None:
 def test_compose_orders_only_has_no_mandate_parser(tmp_path) -> None:
     pkg = tmp_path / "razorpay"
     _mk_domain(pkg, "orders", "RazorpayOrders")
-    write_compose_surface(pkg, psp_name="razorpay", lens_version="^0.2")
+    write_compose_surface(pkg, psp_name="razorpay")
     assert "class RazorpayConnector(RazorpayOrders)" in (pkg / "connector.py").read_text()
     hooks = (pkg / "webhooks.py").read_text()
     assert "parse_payment=" in hooks
