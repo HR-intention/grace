@@ -377,6 +377,29 @@ def test_map_debit_status_unknown_falls_back() -> None:
     assert status is MandateDebitStatus.FAILED
 ```
 
+**Finality / suspend mapping (lens guarantee — assert explicitly).** Beyond the `UNKNOWN`
+fallback above, the *suspend/hold* finality outcome lens guarantees Orbit must be asserted on
+**both** subscription mapping surfaces — never left to incidental coverage. Use the PSP's
+hold/suspend term from `connector_docs/<psp>.md` §6 (`ON_HOLD` for Cashfree):
+
+```python
+from lens.connectors.<psp>.subscriptions.status_map import (
+    map_subscription_status,
+    map_status_changed_event,   # name varies: the fn mapping the PSP suspend signal -> WebhookEventType
+)
+from lens.enums import MandateStatus, WebhookEventType
+
+def test_hold_status_maps_to_suspended() -> None:
+    assert map_subscription_status("<HOLD_TERM>") is MandateStatus.SUSPENDED
+
+def test_hold_event_maps_to_mandate_suspended() -> None:
+    assert map_status_changed_event("<HOLD_TERM>") is WebhookEventType.MANDATE_SUSPENDED
+```
+
+Why mandatory: in periodic mode there is no `*_FAILED_FINAL` event, so the `MANDATE_SUSPENDED`
+mapping is the signal Orbit relies on to call a subscription permanently failed
+(`status_mapping.md` §5). A happy-path sync test does not exercise it.
+
 ---
 
 ## Coverage discipline

@@ -168,6 +168,11 @@ Orbit uses these two signals to decide whether to call the subscription permanen
 The connector sets both fields faithfully from the PSP payload; it does **not** synthesise
 a `*_FAILED_FINAL` variant.
 
+**Test requirement:** assert this finality mapping directly — the PSP's hold/suspend term must
+map to `MandateStatus.SUSPENDED` (subscription status) **and** to
+`WebhookEventType.MANDATE_SUSPENDED` (status-changed event). See `testing.md` → "Finality /
+suspend mapping". Do not rely on a happy-path sync test to cover it.
+
 ---
 
 ## 6. PSP method-group → `PaymentMethod` mapping
