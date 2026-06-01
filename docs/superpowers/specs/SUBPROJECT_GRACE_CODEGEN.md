@@ -3,7 +3,7 @@
 **Inherits from**: `ORBIT_CONSTITUTION.md`. Conflicts resolve in favor of the constitution.
 **Owner**: TBD per implementing agent.
 **Location**: `/Users/sarthak/PycharmProjects/references/grace/` — the team's fork (`github.com/HR-intention/grace`) of `juspay-prism/grace/` (`github.com/juspay/hyperswitch-prism`).
-**Status**: v0.5 — aligned with constitution v0.5. Mandate-capable codegen via a **domain-modular connector**: per-capability mixins (`<Psp>Orders(PaymentsConnector)`, `<Psp>Subscriptions(MandateConnector)`) composed into one registered `<Psp>Connector` over a shared `core/` base, plus the shared `WebhookHandlers` builder. Adds a `--domain {orders|subscriptions|all}` axis to `fetch-docs`/`generate` with **incremental, per-domain regeneration**. A **major Grace *tool* bump** (rulebook + prompt + rubric + CLI shape change, per constitution §8); `ClaudeCodeRunner` is unaffected. **The lens-facing contract is unchanged** — the registered class still isinstance-composes the locked capability interfaces and self-registers via `register` + `register_webhook`; only Grace's CLI ergonomics and the generated package's internal structure evolved. The handoff spec (`2026-05-30-grace-mandate-codegen-handoff.md`) remains authoritative for the lens ABCs (§3), the webhook mechanism (§4), and the Cashfree→lens normalization (§6); **this doc (§3.2) supersedes its §5 flat single-class layout** with the domain-modular structure below.
+**Status**: v0.6 — aligned with constitution v0.6. Connector version gate removed: Grace no longer emits `requires_lens` into generated packages (connectors ship bundled inside the `lens` wheel, so they cannot disagree with the running Lens version). Mandate-capable codegen via a **domain-modular connector**: per-capability mixins (`<Psp>Orders(PaymentsConnector)`, `<Psp>Subscriptions(MandateConnector)`) composed into one registered `<Psp>Connector` over a shared `core/` base, plus the shared `WebhookHandlers` builder. Adds a `--domain {orders|subscriptions|all}` axis to `fetch-docs`/`generate` with **incremental, per-domain regeneration**. A **major Grace *tool* bump** (rulebook + prompt + rubric + CLI shape change, per constitution §8); `ClaudeCodeRunner` is unaffected. **The lens-facing contract is unchanged** — the registered class still isinstance-composes the locked capability interfaces and self-registers via `register` + `register_webhook`; only Grace's CLI ergonomics and the generated package's internal structure evolved. The handoff spec (`2026-05-30-grace-mandate-codegen-handoff.md`) remains authoritative for the lens ABCs (§3), the webhook mechanism (§4), and the Cashfree→lens normalization (§6); **this doc (§3.2) supersedes its §5 flat single-class layout** with the domain-modular structure below.
 
 ---
 
@@ -103,8 +103,7 @@ For each PSP, Grace emits a **domain-modular** package under the Lens monorepo (
 
 ```
 <sylibs>/packages/lens/src/lens/connectors/<psp>/
-  __init__.py            # requires_lens = "^0.2"
-                         # ConnectorFactory.register("<psp>", <Psp>Connector)
+  __init__.py            # ConnectorFactory.register("<psp>", <Psp>Connector)
                          # ConnectorFactory.register_webhook("<psp>", build_webhook_handlers)
   connector.py           # MERGED, registered: class <Psp>Connector(<Psp>Orders, <Psp>Subscriptions): ...
   webhooks.py            # build_webhook_handlers(config) -> WebhookHandlers ; _classify (event -> family)
@@ -144,7 +143,7 @@ connector_docs/<psp>/subscriptions/ # subscription/mandate doc pages (latest; ne
 
 `generate --domain X` reads `connector_docs/<psp>.md` + `_shared/` + `X/`. The reusable mapping *methodology* lives in the generic rulebook (`rulesbook/codegen/python/status_mapping.md` + the mandate webhook pattern); the PSP-specific *decisions* (e.g. `ON_HOLD → SUSPENDED`, the failure-substring precedence, periodic-mode finality) live in `connector_docs/<psp>.md`, scaffolded by `fetch-docs` and completed by a developer before generation.
 
-**`__init__.py` requirements (constitution v0.5):** declare `requires_lens = "^0.2"` at module scope and call **both** `ConnectorFactory.register(...)` and `ConnectorFactory.register_webhook(...)`. A bare `Connector` subclass implementing no capability interface is rejected by `ConnectorFactory.register` at import time.
+**`__init__.py` requirements (constitution v0.6):** call **both** `ConnectorFactory.register(...)` and `ConnectorFactory.register_webhook(...)` at module scope. Do **not** emit `requires_lens` — the connector version gate was removed in constitution v0.6. A bare `Connector` subclass implementing no capability interface is rejected by `ConnectorFactory.register` at import time.
 
 Every file starts with the constitution §4 generated-file marker. The marker is rendered by `templates/marker.j2`. Required marker fields: PSP name, source version/commit, generation timestamp (UTC ISO-8601), Grace version, regeneration command.
 
@@ -172,7 +171,7 @@ class GenerationContext:
     psp_docs: PspDocs            # URL+fetched content, or local paths
     output_dir: Path             # where the connector package will land
     target_module: str           # e.g. "lens.connectors.cashfree"
-    lens_version: str            # so the generated package can pin it
+    lens_version: str            # targeted lens version (selects which ABCs to generate against; no longer pinned into the generated package — gate removed in v0.6)
     domain: str                  # "orders" | "subscriptions" | "all" — scopes the docs
                                  # bundle + which mixin(s) the prompt tells Claude to (re)write
 
@@ -246,8 +245,9 @@ quality:
   min_rubric_score: 60
 
 lens:
-  # The Lens version this Grace targets. Emitted into the
-  # generated package's __init__.py as `requires_lens`.
+  # The Lens version this Grace targets — selects which lens ABCs to
+  # generate against. No longer emitted into generated code (the
+  # `requires_lens` connector version gate was removed in constitution v0.6).
   version_constraint: "^0.2"
 ```
 
@@ -278,7 +278,7 @@ Upstream: tracks `juspay-prism/grace/` per constitution OQ-3.
     - Has the §3.2 layout: root `connector.py` (merged `CashfreeConnector`) + `webhooks.py`; `core/{base,auth,status,models}.py`; `orders/` and `subscriptions/` each with `connector.py`/`models.py`/`status_map.py`/`webhooks.py`; tests under `tests/integration/connectors/cashfree/{orders,subscriptions}/` + `test_webhook_router.py`.
     - Every file carries the constitution §4 marker.
     - `mypy --strict` clean (modern Python 3.11 typing throughout); `pytest --cov` ≥ 80%; rubric ≥ 60/100.
-    - The registered class `CashfreeConnector` isinstance-composes `PaymentsConnector` + `MandateConnector` (via `CashfreeOrders`/`CashfreeSubscriptions` over `_CashfreeBase`); `__init__.py` calls both `ConnectorFactory.register("cashfree", CashfreeConnector)` and `ConnectorFactory.register_webhook("cashfree", build_webhook_handlers)`; `requires_lens = "^0.2"` at module scope.
+    - The registered class `CashfreeConnector` isinstance-composes `PaymentsConnector` + `MandateConnector` (via `CashfreeOrders`/`CashfreeSubscriptions` over `_CashfreeBase`); `__init__.py` calls both `ConnectorFactory.register("cashfree", CashfreeConnector)` and `ConnectorFactory.register_webhook("cashfree", build_webhook_handlers)` at module scope (no `requires_lens` — the version gate was removed in constitution v0.6).
 - [ ] `grace generate cashfree --domain subscriptions` on an existing payments-only package adds the mandate mixin **incrementally** — only `subscriptions/*` + the compose surface (root `connector.py`/`webhooks.py`/`__init__.py`) change; `orders/` and `core/` are untouched.
 - [ ] `grace generate razorpay --from <razorpay-openapi-url>` produces a complete connector from scratch passing all gates (no hand-written reference for diff).
 - [ ] `grace doctor` reports whether Claude Code is reachable and authenticated.
@@ -305,7 +305,7 @@ Total: ~10 days single-agent. Steps 2 and 3 can split between two agents; everyt
 ## §10. Open questions for the implementing agent
 
 - **Q1** (constitution OQ-3): hard-fork or track upstream? **Recommendation**: track upstream. The team's added value is `python-support`; upstream rule improvements are worth pulling. Diverge in branches but `main` merges quarterly.
-- **Q2**: How does Grace know which Lens version to target? **Recommendation**: read `lens.version_constraint` from config; emit it into the generated `__init__.py` as `requires_lens`. When the ABC changes, bump Grace and regenerate.
+- **Q2**: How does Grace know which Lens version to target? **Recommendation**: read `lens.version_constraint` from config to select which lens ABCs to generate against. It is **no longer emitted** into generated code — the `requires_lens` connector version gate was removed in constitution v0.6 (connectors ship bundled inside the `lens` wheel). When the ABC changes, bump Grace and regenerate.
 - **Q3**: Cache the Claude Code output for `regenerate`? **Recommendation**: skip caching in v1. Each `regenerate` is a fresh Claude session — it's not expensive enough yet to be worth the complexity. Revisit if a single regenerate exceeds a few minutes.
 - **Q4**: How are PSP docs fetched? URLs are simple (`httpx.get`); local files are simple (read from disk). What about multi-file OpenAPI specs with `$ref`s pointing to other files? **Recommendation**: support URL + single local file + local directory in v1. `$ref` resolution is Claude's job, not Grace's pre-processor.
 - **Q5**: How does the rubric score "Public-surface conformance" for a PSP that legitimately needs an extra file (e.g., a custom token-refresh helper)? **Recommendation**: rubric only checks *required* files present; extra files don't dock points.

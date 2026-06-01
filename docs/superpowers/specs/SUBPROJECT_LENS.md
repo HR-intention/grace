@@ -3,7 +3,7 @@
 **Inherits from**: `ORBIT_CONSTITUTION.md`. Conflicts resolve in favor of the constitution.
 **Owner**: TBD per implementing agent.
 **Location**: `/Users/sarthak/PycharmProjects/symplora/sylibs/packages/lens/` — package in the `sylibs` monorepo. Distribution name and import name are both `lens`; published to SyPI.
-**Status**: v0.5 / lens 0.2.0 — Periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
+**Status**: v0.6 / lens 0.2.0 — Connector version gate removed; periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
 
 ---
 
@@ -259,14 +259,13 @@ class ConnectorFactory:
     def register(cls, name: str, connector_cls: type[Connector]) -> None:
         """Registers a Connector class under `name`. Validates:
           1. The class's `name` property matches the registry key.
-          2. `connector_cls.requires_lens` (semver string) is satisfied by the
-             running Lens version. Uses packaging.version.SpecifierSet.
-          3. The class implements at least one capability interface
+          2. The class implements at least one capability interface
              (PaymentsConnector or MandateConnector). A bare Connector subclass
              with no capability interface raises INVALID_REQUEST.
 
-        Raises ConnectorError(reason=INVALID_REQUEST) on (1) or (3) mismatch;
-        raises ConnectorError(reason=INCOMPATIBLE_VERSION) on (2) mismatch.
+        Raises ConnectorError(reason=INVALID_REQUEST) on (1) or (2) mismatch.
+        There is no connector-version gate: connectors ship bundled inside the
+        `lens` wheel, so they cannot disagree with the running Lens version.
         """
 
     @classmethod
@@ -299,7 +298,7 @@ class ConnectorFactory:
         via register_webhook. Instantiates no connector and opens no HTTP client."""
 ```
 
-Each `connectors/<psp>/__init__.py` declares `requires_lens` (e.g., `requires_lens = "^0.2"`) at module scope and ends with `ConnectorFactory.register("<psp>", <PspClass>)` and `ConnectorFactory.register_webhook("<psp>", <build_handlers>)`.
+Each `connectors/<psp>/__init__.py` ends with `ConnectorFactory.register("<psp>", <PspClass>)` and `ConnectorFactory.register_webhook("<psp>", <build_handlers>)`. Connectors no longer declare `requires_lens` — there is no version gate (constitution §8 changelog v0.6); they ship bundled inside the `lens` wheel.
 
 ### 4.4 Domain types
 
@@ -694,8 +693,10 @@ class ConnectorErrorReason(StrEnum):
                                                   # (or by this v1 Connector — e.g.,
                                                   #  authorize/capture/void from the
                                                   #  future s2s ABC)
-    INCOMPATIBLE_VERSION = "INCOMPATIBLE_VERSION"  # connector's required Lens
-                                                    # version doesn't match runtime
+    INCOMPATIBLE_VERSION = "INCOMPATIBLE_VERSION"  # retained in the taxonomy; no
+                                                    # longer raised by register (the
+                                                    # connector version gate was
+                                                    # removed in constitution v0.6)
     INTERNAL = "INTERNAL"
 ```
 
