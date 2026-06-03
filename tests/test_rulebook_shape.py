@@ -214,3 +214,9 @@ def test_domain_types_pins_rails_realized_and_plan_types() -> None:
     assert "rails: list[MandateRail]" in dt           # plural request field
     assert "realized_rail" in dt and "payment_group" in dt
     assert "CreatePlanRequest" in dt and "ChangePlanRequest" in dt
+
+
+def test_connector_abc_pins_plan_methods() -> None:
+    t = _CONNECTOR_ABC_TEXT
+    assert "create_plan" in t and "change_plan" in t
+    assert "CreatePlanRequest" in t            # the mixin imports it
