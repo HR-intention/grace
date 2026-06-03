@@ -59,12 +59,27 @@ def ensure_marker(
     grace_version: str,
     source_uri: str,
 ) -> None:
+    """Ensure ``path`` carries a canonical Grace §4 marker.
+
+    The ``Generated:`` timestamp and ``Generator:`` version are Grace-authoritative:
+    the generation backend cannot know the real run time and must not be trusted to
+    stamp the version. So when a well-formed marker is already present (e.g. authored
+    by the backend), those two lines are overwritten with the canonical run values,
+    while the descriptive ``Source:``/``Regenerate:`` lines are left as written. When
+    no marker is present, a full canonical marker is prepended.
+    """
+    ts = generated_utc_iso8601 or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     if has_marker(path):
+        lines = path.read_text().splitlines(keepends=True)
+        # The marker block occupies lines[0:7]; Generated is line 3, Generator line 4.
+        lines[3] = f"#  Generated: {ts}\n"
+        lines[4] = f"#  Generator: grace {grace_version}\n"
+        path.write_text("".join(lines))
         return
     marker = render_marker(
         psp_name=psp_name,
         source_version=source_version,
-        generated_utc_iso8601=generated_utc_iso8601,
+        generated_utc_iso8601=ts,
         grace_version=grace_version,
         source_uri=source_uri,
     )
