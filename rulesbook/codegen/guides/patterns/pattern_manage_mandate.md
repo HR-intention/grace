@@ -121,7 +121,9 @@ async def _manage(
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             raise ConnectorError(reason=ConnectorErrorReason.ORDER_NOT_FOUND) from e
-        raise _map_http_error(e) from e
+        if e.response.status_code in (409, 422):
+            raise ConnectorError(reason=ConnectorErrorReason.INVALID_ORDER_STATE) from e
+        raise _map_http_error(e) from e          # 400 (e.g. CHANGE_PLAN ceiling) → INVALID_REQUEST
     except httpx.HTTPError as e:
         raise ConnectorError(reason=ConnectorErrorReason.PSP_UNAVAILABLE) from e
 
