@@ -77,7 +77,7 @@ async def create_subscription(
             plan_max_amount=str(Decimal(request.max_amount.minor_units) / 100),
             plan_intervals=request.interval_count,
             plan_interval_type=request.interval_type.value,                 # e.g. "MONTH"
-            plan_max_cycles=request.plan_max_cycles,                        # None = omit or PSP default
+            plan_max_cycles=request.max_cycles,                        # None = omit or PSP default
         ),
         # Authorization / approval
         authorization_details=<Psp>AuthorizationDetails(
