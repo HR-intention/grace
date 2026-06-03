@@ -171,7 +171,9 @@ def _scaffold_full_pkg(out: Path) -> None:
             "    async def sync_subscription(self, r): ...\n"
             "    async def cancel_subscription(self, r): ...\n"
             "    async def pause_subscription(self, r): ...\n"
-            "    async def resume_subscription(self, r): ...\n",
+            "    async def resume_subscription(self, r): ...\n"
+            "    async def create_plan(self, r): ...\n"
+            "    async def change_plan(self, r): ...\n",
         ),
         # subscriptions/status_map.py must reference MandateStatus + WebhookEventType.
         (

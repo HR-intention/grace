@@ -96,6 +96,9 @@ from lens.domain_types import (
     ManageMandateRequest,
     ManageMandateResponse,
     MandateWebhookEvent,
+    CreatePlanRequest,
+    CreatePlanResponse,
+    ChangePlanRequest,
 )
 ```
 
@@ -115,7 +118,7 @@ class MandateRequestCommon(BaseModel):
 
 class CreateSubscriptionRequest(MandateRequestCommon):
     idempotency_key: str           # REQUIRED — forward as PSP idempotency token
-    rail: MandateRail
+    rails: list[MandateRail] | None = None   # customer-chosen allow-list; None = PSP default
     customer_ref: str
     customer_contact: CustomerContact   # REQUIRED — email + phone both required
     amount: Amount
@@ -147,6 +150,9 @@ class SyncSubscriptionResponse(BaseModel):
     status: MandateStatus
     next_charge_at: datetime | None = None
     last_debit: MandateDebitOutcome | None = None
+    realized_rail: MandateRail | None = None               # set on sync if auth-group present
+    authorization_reference: str | None = None             # PSP auth id from sync entity
+    payment_group: str | None = None                       # raw PSP payment-group string
     raw: dict[str, Any] | None = None
 
 
@@ -182,8 +188,45 @@ class MandateWebhookEvent(BaseModel):
     occurred_at: datetime
     mandate_status: MandateStatus | None = None
     debit: MandateDebitOutcome | None = None
+    realized_rail: MandateRail | None = None               # set only on auth-SUCCESS
+    authorization_reference: str | None = None             # PSP auth id; null on failure
+    payment_group: str | None = None                       # raw PSP payment-group; null on failure
     raw: dict[str, Any]
 ```
+
+### Plan types (lens 0.4.0 — `create_plan` / `change_plan`)
+
+```python
+class CreatePlanRequest(MandateRequestCommon):
+    idempotency_key: str               # REQUIRED — forward as PSP idempotency token
+    recurring_amount: Amount           # the per-cycle debit amount
+    max_amount: Amount                 # mandate ceiling (RBI-required)
+    interval_type: MandateIntervalType
+    interval_count: int = 1
+    merchant_plan_id: str | None = None   # caller-supplied plan id; None → use idempotency_key
+
+
+class CreatePlanResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=False)
+    plan_id: str                       # the PSP's plan id (echo or derived)
+    raw: dict[str, Any] | None = None
+
+
+class ChangePlanRequest(MandateRequestCommon):
+    idempotency_key: str               # REQUIRED
+    psp_mandate_ref: str               # the mandate to repoint
+    new_plan_id: str                   # the PSP plan id to switch to
+```
+
+**Key rules for plan types:**
+- `CreatePlanRequest.recurring_amount.minor_units` is integer paise; divide by 100 inside the
+  connector to get major units for the PSP wire model. **Never mutate the domain `Amount`.**
+- `plan_type` is always `"PERIODIC"` — `change_plan` (CHANGE_PLAN action) is PERIODIC-only.
+- `merchant_plan_id or idempotency_key` is the deterministic plan id: if the caller provides
+  `merchant_plan_id`, use it; otherwise fall back to `idempotency_key` so idempotent retries
+  send an identical body and the PSP de-duplicates correctly.
+- `ChangePlanRequest` is handled via `change_plan`, which reuses the `_manage` helper with
+  `action="CHANGE_PLAN"` and `action_details={"plan_id": request.new_plan_id}`.
 
 ---
 

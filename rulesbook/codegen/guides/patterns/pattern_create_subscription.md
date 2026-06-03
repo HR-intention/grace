@@ -14,8 +14,13 @@ See `../python/domain_types.md` for the locked shapes. Highlights:
 
 - `request.idempotency_key: str` — **always present** for this flow; forward as the PSP's
   idempotency token.
-- `request.rail: MandateRail` — maps to the PSP's `payment_methods` / `authorization_details`
-  equivalent. The exact wire value is in `connector_docs/<psp>.md` §Subscriptions.
+- `request.rails: list[MandateRail] | None` — the customer's chosen rail allow-list. Translate
+  to the PSP's `payment_methods` / `authorization_details` field by computing the **deduped,
+  order-preserving union** of each rail's method list (iterating `request.rails` in given order;
+  per-rail method strings live in `connector_docs/<psp>.md`). `None` or empty list → **omit**
+  the allow-list field entirely (use `model_dump(exclude_none=True)`; **never send `[]`**).
+  Any rail ∉ `supported_mandate_rails()` → raise `ConnectorError(NOT_SUPPORTED)` **before any
+  HTTP call**.
 - `request.amount: Amount` — `minor_units: int` + `currency: Currency`.
 - `request.max_amount: Amount` — the mandate cap (RBI-required for UPI Autopay and card
   e-mandate).
@@ -72,12 +77,14 @@ async def create_subscription(
             plan_max_amount=str(Decimal(request.max_amount.minor_units) / 100),
             plan_intervals=request.interval_count,
             plan_interval_type=request.interval_type.value,                 # e.g. "MONTH"
-            plan_max_cycles=request.plan_max_cycles,                        # None = omit or PSP default
+            plan_max_cycles=request.max_cycles,                        # None = omit or PSP default
         ),
         # Authorization / approval
         authorization_details=<Psp>AuthorizationDetails(
-            # rail → payment_methods: see connector_docs/<psp>.md §rail-mapping
-            payment_methods=_rail_to_payment_methods(request.rail),
+            # rails → payment_methods: deduped union across all requested rails.
+            # Per-rail method strings live in connector_docs/<psp>.md §rail-mapping.
+            # None / empty → omit via exclude_none=True; never send [].
+            payment_methods=_rails_to_payment_methods(request.rails) or None,
             upi_id=str(request.upi_vpa) if request.upi_vpa is not None else None,
         ),
         subscription_meta=<Psp>SubscriptionMeta(
@@ -158,6 +165,17 @@ def _build_approval_handle(psp_resp: <Psp>CreateSubscriptionResponse) -> Approva
 - **PSP 5xx** — transport returns 503; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 - **Network error** — `MockTransport` raises `httpx.ConnectError`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 
+## Required tests (rails cases)
+
+`tests/test_create_subscription.py` must cover:
+- **Union of two rails** — `rails=[UPI_AUTOPAY, CARD_EMANDATE]` → wire `payment_methods` is the
+  deduped union of both rails' method lists (order-preserving, per `connector_docs/<psp>.md`).
+- **Single rail** — `rails=[CARD_EMANDATE]` → only that rail's methods in the wire field.
+- **`None`** → wire `authorization_details` has no `payment_methods` field (absent, not `[]`).
+- **`[]`** → same as `None` — field absent (use `model_dump(exclude_none=True)`).
+- **Unsupported rail** → `ConnectorError(NOT_SUPPORTED)` raised with **no HTTP call** made
+  (use `httpx.MockTransport` that records calls; assert call count == 0).
+
 ## Pitfalls
 
 - **No pre-created plan_id**: create_subscription is **inline** — the PSP creates the
@@ -165,8 +183,11 @@ def _build_approval_handle(psp_resp: <Psp>CreateSubscriptionResponse) -> Approva
   unless the PSP explicitly requires separate plan creation.
 - **Both `customer_contact.email` and `.phone` are required** — never omit either from the
   PSP customer block.
-- **`rail` → `payment_methods`**: the mapping lives in `connector_docs/<psp>.md` §rail-mapping.
-  Do NOT hardcode the PSP's internal method string here; call `_rail_to_payment_methods`.
+- **`rails` → `payment_methods`**: compute the deduped union across all requested rails. The
+  per-rail method strings live in `connector_docs/<psp>.md` §rail-mapping. Do NOT hardcode
+  PSP method strings here; delegate to `_rails_to_payment_methods(request.rails)`.
+- **`None`/`[]` → omit, never `[]`**: set `payment_methods=None` (or use `exclude_none=True`)
+  so the field is absent from the wire body. Sending an empty list may cause a PSP error.
 - **`idempotency_key` is a `str` (not `str | None`)** on `CreateSubscriptionRequest` — it is
   always present. Forward it unconditionally.
 - **Amount in minor units**: `request.amount.minor_units` is an integer (paise / cents).

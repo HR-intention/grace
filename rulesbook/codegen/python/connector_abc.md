@@ -98,7 +98,7 @@ Do **not** add extra parameters or change return types.
 
 ## Domain mixin: `<Psp>Subscriptions(_<Psp>Base, MandateConnector)`
 
-Implements the five lifecycle methods + four introspection methods. Lives in
+Implements the five lifecycle methods + two plan-management methods + four introspection methods. Lives in
 `subscriptions/connector.py`.
 
 ```python
@@ -110,6 +110,7 @@ from lens.domain_types import (
     CreateSubscriptionRequest, CreateSubscriptionResponse,
     SyncSubscriptionRequest, SyncSubscriptionResponse,
     ManageMandateRequest, ManageMandateResponse,
+    CreatePlanRequest, CreatePlanResponse, ChangePlanRequest,
     Amount,
 )
 from lens.enums import MandateIntervalType, MandateRail
@@ -153,6 +154,12 @@ class <Psp>Subscriptions(_<Psp>Base, MandateConnector):
     async def resume_subscription(
         self, request: ManageMandateRequest
     ) -> ManageMandateResponse: ...
+
+    # --- 2 plan-management methods (async) ---
+
+    async def create_plan(self, request: CreatePlanRequest) -> CreatePlanResponse: ...
+
+    async def change_plan(self, request: ChangePlanRequest) -> ManageMandateResponse: ...
 ```
 
 **`MandateConnector` is singular** — the class and import are `MandateConnector` (not
@@ -162,6 +169,32 @@ The four introspection methods (`supported_mandate_rails`, `supports_pause`,
 `supported_intervals`, `max_mandate_amount`) are **plain methods, not `@property`**. The
 ABC declares them without `@abstractmethod` + `@property` stacking. `max_mandate_amount`
 takes a `rail: MandateRail` argument, which is why it cannot be a property.
+
+---
+
+## MandatesFacade pass-throughs
+
+The `MandatesFacade` (in `lens.mandates_facade`) wraps a `MandateConnector` and exposes its
+methods as a thin pass-through layer. Any new method added to `MandateConnector` must also
+appear as a pass-through on `MandatesFacade`. For Grace-generated connectors:
+
+```python
+# mandates_facade.py (lens-side — for reference only; do not redefine in the connector)
+class MandatesFacade:
+    def __init__(self, connector: MandateConnector) -> None:
+        self._connector = connector
+
+    async def create_plan(self, request: CreatePlanRequest) -> CreatePlanResponse:
+        return await self._connector.create_plan(request)
+
+    async def change_plan(self, request: ChangePlanRequest) -> ManageMandateResponse:
+        return await self._connector.change_plan(request)
+
+    # ... plus all existing pass-throughs (create_subscription, sync_subscription, etc.)
+```
+
+The facade is **lens-owned** — do not emit it from Grace. The connector just satisfies the
+`MandateConnector` ABC; the facade picks up the new methods automatically.
 
 ---
 

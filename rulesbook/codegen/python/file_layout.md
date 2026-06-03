@@ -20,7 +20,7 @@ connectors/<psp>/
     status_map.py        # PSP payment status -> (PaymentAttemptStatus, PaymentFailureCode)
     webhooks.py          # _parse_payment_webhook(bytes) -> PaymentWebhookEvent
   subscriptions/
-    connector.py         # class <Psp>Subscriptions(_<Psp>Base, MandateConnector): 5 lifecycle + 4 introspection
+    connector.py         # class <Psp>Subscriptions(_<Psp>Base, MandateConnector): 5 lifecycle + 2 plan-mgmt + 4 introspection
     models.py            # subscription / plan / mandate wire models
     status_map.py        # subscription_status -> MandateStatus; event -> WebhookEventType
     webhooks.py          # _parse_mandate_webhook(bytes) -> MandateWebhookEvent
@@ -87,6 +87,8 @@ subscriptions/connector.py — class <Psp>Subscriptions(_<Psp>Base, MandateConne
                        And 5 async lifecycle methods:
                          create_subscription, sync_subscription,
                          cancel_subscription, pause_subscription, resume_subscription.
+                       And 2 async plan-management methods:
+                         create_plan, change_plan.
 
 subscriptions/models.py    — Subscription / plan / mandate wire models (Pydantic).
 

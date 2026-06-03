@@ -32,3 +32,9 @@ class DemoSubscriptions(_DemoBase, MandateConnector):
 
     async def resume_subscription(self, request: object) -> object:
         ...
+
+    async def create_plan(self, request: object) -> object:
+        ...
+
+    async def change_plan(self, request: object) -> object:
+        ...

@@ -13,6 +13,7 @@ _STATUS_MAPPING_TEXT = (R / "status_mapping.md").read_text()
 _DOMAIN_TYPES_TEXT = (R / "domain_types.md").read_text()
 _PITFALLS_TEXT = (R / "pitfalls.md").read_text()
 _TESTING_TEXT = (R / "testing.md").read_text()
+_FILE_LAYOUT_TEXT = (R / "file_layout.md").read_text()
 
 P = Path("rulesbook/codegen/guides/patterns")
 
@@ -26,6 +27,7 @@ _RSYNC_TEXT = (P / "pattern_rsync.md").read_text()
 _SYNC_SUBSCRIPTION_TEXT = (P / "pattern_sync_subscription.md").read_text()
 _MANDATE_WEBHOOK_TEXT = (P / "pattern_mandate_webhook.md").read_text()
 _INCOMING_WEBHOOK_TEXT = (P / "pattern_IncomingWebhook_flow.md").read_text()
+_CREATE_PLAN_TEXT = (P / "pattern_create_plan.md").read_text()
 
 
 def test_webhook_rule_is_shared_router_not_connector_method() -> None:
@@ -168,3 +170,68 @@ def test_incoming_webhook_pattern_requires_classify_tests() -> None:
     assert "_classify" in t
     # Should test both payment and mandate family routing
     assert "MANDATE" in t and "PAYMENT" in t
+
+
+def test_create_subscription_pattern_pins_rails_union() -> None:
+    t = _CREATE_SUBSCRIPTION_TEXT
+    assert "rails" in t                      # plural request field
+    assert "request.rail:" not in t          # singular form removed
+    assert "NOT_SUPPORTED" in t              # reject unsupported rails
+    assert "exclude_none" in t or "omit" in t.lower()   # None/empty ⇒ omit, never []
+
+
+def test_mandate_webhook_pattern_pins_realized_rail() -> None:
+    t = _MANDATE_WEBHOOK_TEXT
+    assert "realized_rail" in t and "authorization_reference" in t and "payment_group" in t
+    assert "SUCCESS" in t                    # gate on auth-success
+    assert "null" in t.lower() or "None" in t  # null all three on failure
+
+
+def test_sync_subscription_pattern_pins_realized_rail_and_spelling() -> None:
+    t = _SYNC_SUBSCRIPTION_TEXT
+    assert "realized_rail" in t
+    # the webhook-vs-sync wire-key spelling may differ per PSP
+    assert "spelling" in t.lower() or ("authorisation" in t and "authorization" in t)
+
+
+def test_manage_mandate_pattern_pins_change_plan() -> None:
+    t = _MANAGE_MANDATE_TEXT
+    assert "CHANGE_PLAN" in t and "action_details" in t and "plan_id" in t
+    # ceiling rejection arrives as 400 → _map_http_error, NOT the 409/422 state shortcut
+    assert "400" in t
+
+
+def test_create_plan_pattern_pins_rules() -> None:
+    t = _CREATE_PLAN_TEXT
+    assert "/plans" in t                                 # POST /plans
+    assert "PERIODIC" in t                               # plan_type constant
+    assert "merchant_plan_id" in t and "idempotency_key" in t   # deterministic plan_id
+    assert "minor_units" in t                            # major-unit conversion
+    assert "CreatePlanResponse" in t
+
+
+def test_domain_types_pins_rails_realized_and_plan_types() -> None:
+    dt = _DOMAIN_TYPES_TEXT
+    assert "rails: list[MandateRail]" in dt           # plural request field
+    assert "realized_rail" in dt and "payment_group" in dt
+    assert "CreatePlanRequest" in dt and "ChangePlanRequest" in dt
+
+
+def test_connector_abc_pins_plan_methods() -> None:
+    t = _CONNECTOR_ABC_TEXT
+    assert "create_plan" in t and "change_plan" in t
+    assert "CreatePlanRequest" in t            # the mixin imports it
+
+
+def test_status_mapping_pins_raw_preserving_many_to_few() -> None:
+    sm = _STATUS_MAPPING_TEXT
+    assert "payment_group" in sm and "MandateRail" in sm
+    assert "raw" in sm.lower()        # preserve the raw value alongside the normalized one
+
+
+def test_bundled_core_docs_use_new_mandate_contract() -> None:
+    # testing.md fixture must use the plural rails field, not singular rail=
+    assert "rails=" in _TESTING_TEXT
+    assert "rail=MandateRail" not in _TESTING_TEXT
+    # file_layout.md must enumerate the plan-management methods
+    assert "create_plan" in _FILE_LAYOUT_TEXT and "change_plan" in _FILE_LAYOUT_TEXT

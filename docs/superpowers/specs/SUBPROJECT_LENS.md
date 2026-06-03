@@ -3,7 +3,7 @@
 **Inherits from**: `ORBIT_CONSTITUTION.md`. Conflicts resolve in favor of the constitution.
 **Owner**: TBD per implementing agent.
 **Location**: `/Users/sarthak/PycharmProjects/symplora/sylibs/packages/lens/` — package in the `sylibs` monorepo. Distribution name and import name are both `lens`; published to SyPI.
-**Status**: v0.7 / lens 0.2.1 — `CreateSubscriptionRequest` exposes optional Cashfree authorization-amount fields; connector version gate removed; periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
+**Status**: v0.9 / lens 0.4.0 — mandate plan upgrade/downgrade: `MandateConnector` / `MandatesFacade` gain `create_plan` + `change_plan` with `CreatePlanRequest`/`CreatePlanResponse`/`ChangePlanRequest`. Customer-chosen mandate rail: `CreateSubscriptionRequest.rail` → `rails: list[MandateRail] | None`; `MandateWebhookEvent` / `SyncSubscriptionResponse` surface the realized rail (`realized_rail` / `authorization_reference` / `payment_group`) (lens 0.3.0). `CreateSubscriptionRequest` exposes optional Cashfree authorization-amount fields (lens 0.2.1); connector version gate removed; periodic subscription-mandate surface; capability-interface model; shared WebhookRouter.
 
 ---
 
@@ -129,6 +129,10 @@ class MandatesFacade:
     async def pause_subscription(self,   request: ManageMandateRequest)       -> ManageMandateResponse: ...
     async def resume_subscription(self,  request: ManageMandateRequest)       -> ManageMandateResponse: ...
 
+    # Plan management (async) — v0.9 (upgrade/downgrade)
+    async def create_plan(self,          request: CreatePlanRequest)          -> CreatePlanResponse: ...
+    async def change_plan(self,          request: ChangePlanRequest)          -> ManageMandateResponse: ...
+
     async def close(self) -> None: ...
 
     # Introspection pass-throughs (sync — MandateConnector methods are plain, not async)
@@ -232,6 +236,13 @@ class MandateConnector(Connector):
 
     @abstractmethod
     async def resume_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
+
+    # Plan management (async) — v0.9 (upgrade/downgrade)
+    @abstractmethod
+    async def create_plan(self, request: CreatePlanRequest) -> CreatePlanResponse: ...
+
+    @abstractmethod
+    async def change_plan(self, request: ChangePlanRequest) -> ManageMandateResponse: ...
 ```
 
 A PSP connector that supports both flows uses multiple inheritance: `class Cashfree(PaymentsConnector, MandateConnector): ...`. Future `S2SConnector(Connector)` will be additive (minor bump, no further base reshape).
@@ -428,7 +439,7 @@ class CustomerContact(BaseModel):
 # create_subscription
 class CreateSubscriptionRequest(MandateRequestCommon):
     idempotency_key: str
-    rail: MandateRail
+    rails: list[MandateRail] | None = None         # None/empty = offer all supported instruments
     customer_ref: str
     customer_contact: CustomerContact
     amount: Amount
@@ -464,6 +475,9 @@ class SyncSubscriptionResponse(BaseModel):         # frozen=False
     status: MandateStatus
     next_charge_at: datetime | None = None
     last_debit: MandateDebitOutcome | None = None
+    realized_rail: MandateRail | None = None       # instrument the customer chose (auth success only)
+    authorization_reference: str | None = None     # UMN / UMRN / enrollment id
+    payment_group: str | None = None               # raw Cashfree group (upi/enach/pnach/card/debit_card)
     raw: dict[str, Any] | None = None
 
 # cancel_subscription / pause_subscription / resume_subscription
@@ -476,6 +490,24 @@ class ManageMandateRequest(MandateRequestCommon):
 class ManageMandateResponse(BaseModel):            # frozen=False
     status: MandateStatus
     raw: dict[str, Any] | None = None
+
+# create_plan / change_plan (v0.9 — mandate plan upgrade/downgrade)
+class CreatePlanRequest(MandateRequestCommon):
+    idempotency_key: str
+    recurring_amount: Amount
+    max_amount: Amount
+    interval_type: MandateIntervalType
+    interval_count: int = 1
+    merchant_plan_id: str | None = None            # None → connector derives a deterministic plan id
+
+class CreatePlanResponse(BaseModel):               # frozen=False
+    plan_id: str
+    raw: dict[str, Any] | None = None
+
+class ChangePlanRequest(MandateRequestCommon):     # response is ManageMandateResponse
+    idempotency_key: str
+    psp_mandate_ref: str
+    new_plan_id: str
 
 # Outcome of one PSP-scheduled debit attempt. Frozen.
 class MandateDebitOutcome(BaseModel):
@@ -497,6 +529,9 @@ class MandateWebhookEvent(BaseModel):
     occurred_at: datetime
     mandate_status: MandateStatus | None = None
     debit: MandateDebitOutcome | None = None
+    realized_rail: MandateRail | None = None       # instrument the customer chose (auth success only)
+    authorization_reference: str | None = None     # UMN / UMRN / enrollment id
+    payment_group: str | None = None               # raw Cashfree group (upi/enach/pnach/card/debit_card)
     raw: dict[str, Any]
 ```
 

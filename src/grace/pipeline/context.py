@@ -39,6 +39,7 @@ DOMAIN_PATTERN_FILES: dict[str, list[str]] = {
         "rulesbook/codegen/guides/patterns/pattern_sync_subscription.md",
         "rulesbook/codegen/guides/patterns/pattern_manage_mandate.md",
         "rulesbook/codegen/guides/patterns/pattern_mandate_webhook.md",
+        "rulesbook/codegen/guides/patterns/pattern_create_plan.md",
     ],
 }
 

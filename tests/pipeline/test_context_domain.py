@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from grace.pipeline.context import assemble_context
+from grace.pipeline.context import assemble_context, rulebook_files_for_domain
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_rulebook_selection_is_domain_keyed() -> None:
-    from grace.pipeline.context import rulebook_files_for_domain
     orders = " ".join(rulebook_files_for_domain("orders"))
     subs = " ".join(rulebook_files_for_domain("subscriptions"))
     assert "connector_abc.md" in orders and "connector_abc.md" in subs   # core always
@@ -51,3 +50,8 @@ def test_assemble_context_carries_domain(tmp_path: Path) -> None:
         repo_root=repo, domain="subscriptions",
     )
     assert ctx.domain == "subscriptions"
+
+
+def test_subscriptions_rulebook_includes_create_plan_pattern() -> None:
+    files = rulebook_files_for_domain("subscriptions")
+    assert "rulesbook/codegen/guides/patterns/pattern_create_plan.md" in files
