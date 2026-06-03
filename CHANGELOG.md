@@ -4,6 +4,24 @@ Notable changes to the Grace codegen tool. Grace follows SemVer; per Orbit Const
 a rulebook/template change that alters generated-code shape is a **major** bump (expressed
 pre-1.0 as a `0.x` increment). The §4 generated-file marker records the Grace version used.
 
+## 0.9.0 — 2026-06-03
+
+Customer-chosen mandate rail + plan upgrade/downgrade — reproduce the lens 0.3.0 / 0.4.0
+hand-edits via regen (generated-output-shape change → major per constitution §8):
+
+- **Rail set (`create_subscription`):** `CreateSubscriptionRequest.rail` → `rails: list[MandateRail] | None`;
+  the connector translates it into the PSP `payment_methods` allow-list — deduped order-preserving
+  union, `None`/empty ⇒ omit (never `[]`), unsupported rails rejected with `NOT_SUPPORTED` pre-HTTP.
+- **Realized rail (webhook + sync):** `MandateWebhookEvent` and `SyncSubscriptionResponse` carry
+  `realized_rail` / `authorization_reference` / `payment_group`, populated only on a successful
+  authorization (the webhook and sync wire-key spellings may differ); plus a raw-preserving many→few
+  `payment_group → MandateRail` mapper.
+- **Plan management:** new `create_plan` (`POST /plans`, PERIODIC, deterministic plan id, major-unit
+  amounts) + `change_plan` (CHANGE_PLAN manage action; ceiling rejection is a 400 → `INVALID_REQUEST`).
+- **Pipeline:** `prompt.py` permits the realized-rail fields, imports the plan types, and instructs the
+  new methods; `quality_rubric.py` gates `create_plan`/`change_plan`; `context.py` registers
+  `pattern_create_plan.md`; new/updated rulebook patterns + mirror docs.
+
 ## 0.8.0 — 2026-06-01
 
 Fold Orbit's live Cashfree sandbox hotfix into Grace so a regen reproduces it
