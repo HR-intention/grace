@@ -176,3 +176,10 @@ def test_create_subscription_pattern_pins_rails_union() -> None:
     assert "request.rail:" not in t          # singular form removed
     assert "NOT_SUPPORTED" in t              # reject unsupported rails
     assert "exclude_none" in t or "omit" in t.lower()   # None/empty ⇒ omit, never []
+
+
+def test_mandate_webhook_pattern_pins_realized_rail() -> None:
+    t = _MANDATE_WEBHOOK_TEXT
+    assert "realized_rail" in t and "authorization_reference" in t and "payment_group" in t
+    assert "SUCCESS" in t                    # gate on auth-success
+    assert "null" in t.lower() or "None" in t  # null all three on failure

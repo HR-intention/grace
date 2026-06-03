@@ -102,6 +102,61 @@ def _to_debit_outcome(psp_event: <Psp>MandateWebhookEvent) -> MandateDebitOutcom
     )
 ```
 
+## Realized rail (auth-success only)
+
+On the PSP's mandate-authorized event, **when the authorization succeeded**, populate the three
+optional realized-rail fields on `MandateWebhookEvent`:
+
+- `realized_rail: MandateRail | None` — the rail that the customer actually completed
+  authorization on (mapped from the PSP's payment-group via `map_payment_group_to_rail`; see
+  `status_mapping.md` §many→few + `connector_docs/<psp>.md` §realized-rail).
+- `authorization_reference: str | None` — the PSP's authorization identifier from its
+  authorization block (wire key in `connector_docs/<psp>.md`).
+- `payment_group: str | None` — the raw PSP payment-group string, preserved alongside the
+  normalized `realized_rail` (the enum is coarser than the raw value).
+
+**Gate strictly on the PSP's auth-success signal** (e.g. the event's `payment_type == "AUTH"`
+and `payment_status == "SUCCESS"` combination — exact field names and values in
+`connector_docs/<psp>.md`). **Null all three fields on failure even if the authorization block
+is present in the payload.** Never infer a rail from a card-expiry / debit-notified / reminder
+event — those have no authorization_details block.
+
+Implementation note: read the PSP's authorization block from the event payload. Coerce all dict
+reads with `isinstance` checks (no `Any` leaks). The wire key name for the authorization block
+may differ between the webhook and the sync response (see `pattern_sync_subscription.md` and
+`connector_docs/<psp>.md` for each path's own key).
+
+```python
+# Pseudocode — gate on auth-success before populating:
+if psp_event.payment_type == "AUTH" and psp_event.payment_status == "SUCCESS":
+    auth_block = psp_event.<authorization_block_field>    # wire key from connector_docs
+    if auth_block is not None and isinstance(auth_block, dict):
+        raw_group = auth_block.get("<payment_group_field>")  # wire key from connector_docs
+        payment_group: str | None = raw_group if isinstance(raw_group, str) else None
+        realized_rail = map_payment_group_to_rail(payment_group)
+        authorization_reference = ...  # auth id wire key from connector_docs
+    else:
+        payment_group = None
+        realized_rail = None
+        authorization_reference = None
+else:
+    # Auth failed, or non-auth event: null all three unconditionally.
+    payment_group = None
+    realized_rail = None
+    authorization_reference = None
+```
+
+### Required tests (realized rail)
+
+- **AUTH-SUCCESS + known group** → `realized_rail` populated, `authorization_reference`
+  populated, `payment_group` equals the raw string.
+- **AUTH-FAILED with `payment_group` present in body** → all three fields are `None`
+  (the gotcha: the group may be present even on failure; only SUCCESS sets the fields).
+- **Non-auth event (e.g. expiry-reminder)** → all three fields are `None` (no auth block
+  present; never synthesize a rail from a reminder event).
+- **AUTH-SUCCESS with no authorization block** → all three fields are `None` (absent block
+  treated the same as failure).
+
 ## Per-PSP event → WebhookEventType table
 
 The `_EVENT_MAP` dict is the sole place where PSP event strings are mapped. Fill it
