@@ -67,10 +67,30 @@ async def sync_subscription(
     if psp_resp.<last_payment_field> is not None:
         last_debit = _to_debit_outcome(psp_resp.<last_payment_field>, request.psp_mandate_ref)
 
+    # Realized rail (sync recovery path for missed auth webhook).
+    # Extract only when the PSP entity carries a payment-group in its authorization block.
+    # Note: the wire key for the authorization block on the sync entity may differ from the
+    # webhook's — some PSPs spell it differently (e.g. British "authorisation_details" on sync
+    # vs American "authorization_details" on the webhook). Read each path's own key from
+    # connector_docs/<psp>.md; do not assume the same spelling applies to both paths.
+    auth_block = getattr(psp_resp, "<authorisation_block_field>", None)   # British or American per PSP
+    if auth_block is not None and isinstance(auth_block, dict):
+        raw_group = auth_block.get("<payment_group_field>")
+        payment_group: str | None = raw_group if isinstance(raw_group, str) else None
+        realized_rail: MandateRail | None = map_payment_group_to_rail(payment_group)
+        authorization_reference: str | None = auth_block.get("<authorization_reference_field>")
+    else:
+        payment_group = None
+        realized_rail = None
+        authorization_reference = None
+
     return SyncSubscriptionResponse(
         status=map_subscription_status(psp_resp.subscription_status),
         next_charge_at=psp_resp.<next_charge_field>,    # datetime or None; parse as needed
         last_debit=last_debit,
+        realized_rail=realized_rail,
+        authorization_reference=authorization_reference,
+        payment_group=payment_group,
         raw=psp_resp.model_dump(),
     )
 
@@ -124,6 +144,17 @@ def _to_debit_outcome(
 - **Unknown subscription-status fallback** — PSP body has an unmapped `subscription_status`
   string; assert does NOT raise and `response.status` is the documented fallback (exercises the
   `map_subscription_status` warning branch).
+
+## Authorization/spelling-split callout
+
+> **The sync wire key may differ from the webhook's.** Some PSPs use British spelling
+> (`authorisation_details`) on the sync fetch entity and American spelling (`authorization_details`)
+> on the webhook payload. Read **each path's own key** from `connector_docs/<psp>.md` — do not
+> assume the webhook and sync share the same field name. The sync path is the reconcile-backstop
+> recovery for a missed auth webhook: if `payment_group` is present in the sync entity's
+> authorization block, populate the three realized-rail fields (`realized_rail`,
+> `authorization_reference`, `payment_group`) on `SyncSubscriptionResponse`. If absent or
+> `None`, leave all three as `None`; `last_debit` stays `None` on this path.
 
 ## Pitfalls
 

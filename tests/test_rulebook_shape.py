@@ -183,3 +183,10 @@ def test_mandate_webhook_pattern_pins_realized_rail() -> None:
     assert "realized_rail" in t and "authorization_reference" in t and "payment_group" in t
     assert "SUCCESS" in t                    # gate on auth-success
     assert "null" in t.lower() or "None" in t  # null all three on failure
+
+
+def test_sync_subscription_pattern_pins_realized_rail_and_spelling() -> None:
+    t = _SYNC_SUBSCRIPTION_TEXT
+    assert "realized_rail" in t
+    # the webhook-vs-sync wire-key spelling may differ per PSP
+    assert "spelling" in t.lower() or ("authorisation" in t and "authorization" in t)
