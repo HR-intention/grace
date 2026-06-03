@@ -179,3 +179,13 @@ def test_prompt_uses_package_local_test_paths(tmp_path: Path) -> None:
         "File list contains a fully-relocated test path — generator should write "
         "package-local tests/test_*.py instead"
     )
+
+
+def test_subscriptions_prompt_imports_plan_types(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "subscriptions"))
+    assert "CreatePlanRequest" in p and "CreatePlanResponse" in p and "ChangePlanRequest" in p
+
+
+def test_subscriptions_prompt_permits_realized_rail_fields(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "subscriptions"))
+    assert "realized_rail" in p and "authorization_reference" in p and "payment_group" in p

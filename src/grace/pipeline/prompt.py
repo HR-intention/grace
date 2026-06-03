@@ -86,6 +86,7 @@ _IMPORTS_SUBSCRIPTIONS = """\
          CreateSubscriptionRequest, CreateSubscriptionResponse,
          SyncSubscriptionRequest, SyncSubscriptionResponse,
          ManageMandateRequest, ManageMandateResponse,
+         CreatePlanRequest, CreatePlanResponse, ChangePlanRequest,
          MandateWebhookEvent,
          Amount,
      )
@@ -107,6 +108,7 @@ _IMPORTS_ALL = """\
          CreateSubscriptionRequest, CreateSubscriptionResponse,
          SyncSubscriptionRequest, SyncSubscriptionResponse,
          ManageMandateRequest, ManageMandateResponse,
+         CreatePlanRequest, CreatePlanResponse, ChangePlanRequest,
          MandateWebhookEvent,
          Amount,
      )
@@ -509,10 +511,16 @@ _LOCKED_DOMAIN_TYPES_SUBSCRIPTIONS = """\
 
    Response fields are locked (no invented extras):
    - CreateSubscriptionResponse: psp_mandate_ref, status, approval, raw
-   - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw
+   - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw,
+                                 realized_rail, authorization_reference, payment_group
+                                 (the last three are optional, default None — populate only on a
+                                  successful authorization; see pattern_sync_subscription.md)
 
-   LOCKED MandateWebhookEvent FIELDS (EXACT — no more, no less):
-     event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw
+   LOCKED MandateWebhookEvent FIELDS (the 7 core + 3 optional realized-rail):
+     event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw,
+     realized_rail, authorization_reference, payment_group
+   ✓ realized_rail/authorization_reference/payment_group are OPTIONAL (default None) — set them only
+     on an auth-SUCCESS event; null on failure. Do NOT add any field beyond these ten.
    ✓ `occurred_at` IS present on MandateWebhookEvent (unlike PaymentWebhookEvent).
    ✓ The raw payload field is `raw` (dict[str, Any]) — NOT `raw_payload`.
    Build: MandateWebhookEvent(event_type=…, psp_mandate_ref=…, psp_event_id=…, occurred_at=…, raw=…)"""
@@ -558,7 +566,10 @@ _LOCKED_DOMAIN_TYPES_ALL = """\
    - PaymentAttempt:          psp_payment_id, status, method_used, amount (Amount|None), failure_code,
                               failure_reason, attempted_at (required, non-optional), raw
    - CreateSubscriptionResponse: psp_mandate_ref, status, approval, raw
-   - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw
+   - SyncSubscriptionResponse:   status, next_charge_at, last_debit, raw,
+                                 realized_rail, authorization_reference, payment_group
+                                 (the last three are optional, default None — populate only on a
+                                  successful authorization; see pattern_sync_subscription.md)
 
    LOCKED int-minor-units rule — these response fields are plain `int`, NOT `Amount`:
    ✗ `paid_amount=Amount(...)` — SyncPaymentResponse.paid_amount is int minor-units
@@ -599,8 +610,11 @@ _LOCKED_DOMAIN_TYPES_ALL = """\
            raise ConnectorError(reason=ConnectorErrorReason.INTERNAL)
        return CreateOrderResponse(payment_link=HttpUrl(link), ...)
 
-   LOCKED MandateWebhookEvent FIELDS (EXACT — no more, no less):
-     event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw
+   LOCKED MandateWebhookEvent FIELDS (the 7 core + 3 optional realized-rail):
+     event_type, psp_mandate_ref, psp_event_id, occurred_at, mandate_status, debit, raw,
+     realized_rail, authorization_reference, payment_group
+   ✓ realized_rail/authorization_reference/payment_group are OPTIONAL (default None) — set them only
+     on an auth-SUCCESS event; null on failure. Do NOT add any field beyond these ten.
    ✓ `occurred_at` IS present on MandateWebhookEvent (unlike PaymentWebhookEvent).
    ✓ The raw payload field is `raw` (dict[str, Any]) — NOT `raw_payload`.
    Build: MandateWebhookEvent(event_type=…, psp_mandate_ref=…, psp_event_id=…, occurred_at=…, raw=…)"""
