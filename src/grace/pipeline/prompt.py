@@ -32,7 +32,8 @@ _FILE_LIST_SUBSCRIPTIONS = """\
   tests/test_sync_subscription.py
   tests/test_manage_mandate.py  # covers cancel_subscription, pause_subscription, resume_subscription
   tests/test_pause_subscription.py
-  tests/test_resume_subscription.py"""
+  tests/test_resume_subscription.py
+  tests/test_plan_management.py"""
 
 _FILE_LIST_WEBHOOK_ROUTER_TEST = """\
   tests/test_webhook_router.py"""
@@ -177,7 +178,7 @@ orders/webhooks.py — _parse_payment_webhook
 _CLASS_SHAPE_SUBSCRIPTIONS = """\
 subscriptions/connector.py — <Psp>Subscriptions(_<Psp>Base, MandateConnector)
    NOTE: MandateConnector is SINGULAR — MandatesConnector does not exist.
-   Implements 4 introspection methods (plain def, NOT @property, NOT async) + 5 async lifecycle:
+   Implements 4 introspection methods (plain def, NOT @property, NOT async) + 5 lifecycle + create_plan + change_plan:
 
      class <Psp>Subscriptions(_<Psp>Base, MandateConnector):
          # --- 4 introspection methods (plain def, no @property, no async) ---
@@ -192,6 +193,8 @@ subscriptions/connector.py — <Psp>Subscriptions(_<Psp>Base, MandateConnector)
          async def cancel_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
          async def pause_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
          async def resume_subscription(self, request: ManageMandateRequest) -> ManageMandateResponse: ...
+         async def create_plan(self, request: CreatePlanRequest) -> CreatePlanResponse: ...
+         async def change_plan(self, request: ChangePlanRequest) -> ManageMandateResponse: ...
 
 subscriptions/webhooks.py — _parse_mandate_webhook
    Parses an already-verified raw payload into the mandate domain event:
@@ -287,7 +290,11 @@ _SELF_CHECK_SUBSCRIPTIONS = """\
     Grep(pattern="from lens.mandate_connector import MandateConnector", path=<cwd>/subscriptions, glob="connector.py")
         → present
     Grep(pattern="async def", path=<cwd>/subscriptions, glob="connector.py", output_mode="count")
-        → >= 5 (five async lifecycle methods)
+        → >= 7 (five lifecycle + create_plan + change_plan)
+    Grep(pattern="async def create_plan", path=<cwd>/subscriptions, glob="connector.py")
+        → >= 1 match
+    Grep(pattern="async def change_plan", path=<cwd>/subscriptions, glob="connector.py")
+        → >= 1 match
     Grep(pattern="def supported_mandate_rails\\|def supports_pause\\|def supported_intervals\\|def max_mandate_amount", path=<cwd>/subscriptions, glob="connector.py", output_mode="count")
         → 4 matches  (plain def, NOT @property, NOT async def)
     Grep(pattern="def _parse_mandate_webhook", path=<cwd>/subscriptions, glob="webhooks.py")

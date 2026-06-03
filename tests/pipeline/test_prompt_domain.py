@@ -189,3 +189,11 @@ def test_subscriptions_prompt_imports_plan_types(tmp_path: Path) -> None:
 def test_subscriptions_prompt_permits_realized_rail_fields(tmp_path: Path) -> None:
     p = build_prompt(_ctx(tmp_path, "subscriptions"))
     assert "realized_rail" in p and "authorization_reference" in p and "payment_group" in p
+
+
+def test_subscriptions_prompt_instructs_plan_methods(tmp_path: Path) -> None:
+    p = build_prompt(_ctx(tmp_path, "subscriptions"))
+    # method names instructed in the class shape
+    assert "create_plan" in p and "change_plan" in p
+    # the plan-management test file is in the file list
+    assert "test_plan_management.py" in p
