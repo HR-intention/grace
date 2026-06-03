@@ -51,3 +51,9 @@ def test_assemble_context_carries_domain(tmp_path: Path) -> None:
         repo_root=repo, domain="subscriptions",
     )
     assert ctx.domain == "subscriptions"
+
+
+def test_subscriptions_rulebook_includes_create_plan_pattern() -> None:
+    from grace.pipeline.context import rulebook_files_for_domain
+    files = rulebook_files_for_domain("subscriptions")
+    assert "rulesbook/codegen/guides/patterns/pattern_create_plan.md" in files
