@@ -148,3 +148,10 @@ def test_failing_reports_drop_the_total() -> None:
     by = {d.name: d for d in report.dimensions}
     assert by["type_correctness"].score == 0, by["type_correctness"].detail      # mypy failed
     assert by["test_coverage"].score < 25, by["test_coverage"].detail            # 10% < 80%
+
+
+def test_missing_plan_methods_dock_public_surface(tmp_path: Path) -> None:
+    """A subscriptions connector missing create_plan/change_plan must be docked."""
+    from grace.quality_rubric import _V2_DOMAIN_METHODS
+    assert "create_plan" in _V2_DOMAIN_METHODS["subscriptions"]
+    assert "change_plan" in _V2_DOMAIN_METHODS["subscriptions"]

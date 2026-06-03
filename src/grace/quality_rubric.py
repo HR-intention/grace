@@ -450,15 +450,11 @@ _V2_DOMAIN_METHODS: dict[str, list[str]] = {
         "supports_idempotency_key",
     ],
     "subscriptions": [
-        "create_subscription",
-        "sync_subscription",
-        "cancel_subscription",
-        "pause_subscription",
-        "resume_subscription",
-        "supported_mandate_rails",
-        "supports_pause",
-        "supported_intervals",
-        "max_mandate_amount",
+        "create_subscription", "sync_subscription", "cancel_subscription",
+        "pause_subscription", "resume_subscription",
+        "create_plan", "change_plan",
+        "supported_mandate_rails", "supports_pause",
+        "supported_intervals", "max_mandate_amount",
     ],
 }
 
