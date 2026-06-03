@@ -42,14 +42,19 @@ async def resume_subscription(
 
 ## PSP verb mapping
 
-| Lens method | PSP action verb | Expected new `MandateStatus` |
-|---|---|---|
-| `cancel_subscription` | `CANCEL` (PSP-specific) | `MandateStatus.CANCELLED` |
-| `pause_subscription` | `PAUSE` (PSP-specific) | `MandateStatus.PAUSED` |
-| `resume_subscription` | **`ACTIVATE`** | `MandateStatus.ACTIVE` |
+| Lens method | PSP action verb | `action_details` | Expected new `MandateStatus` |
+|---|---|---|---|
+| `cancel_subscription` | `CANCEL` (PSP-specific) | none | `MandateStatus.CANCELLED` |
+| `pause_subscription` | `PAUSE` (PSP-specific) | none | `MandateStatus.PAUSED` |
+| `resume_subscription` | **`ACTIVATE`** | none | `MandateStatus.ACTIVE` |
+| `change_plan` | **`CHANGE_PLAN`** | `{"plan_id": <new_plan_id>}` | unchanged (whatever PSP echoes) |
 
 **`resume_subscription` maps to the PSP's ACTIVATE verb.** There is no separate RESUME verb
 in the PSP APIs observed. When calling `resume_subscription`, send the ACTIVATE action.
+
+**`change_plan` reuses the same `_manage` helper** with `action="CHANGE_PLAN"` and passes
+`action_details={"plan_id": request.new_plan_id}` in the action payload. The `plan_id` key
+name is PSP-specific — see `connector_docs/<psp>.md` for the exact field name.
 
 ## Implementation skeleton
 
@@ -73,13 +78,30 @@ async def resume_subscription(
     return await self._manage(request, action="ACTIVATE")
 
 
+async def change_plan(self, request: ChangePlanRequest) -> ManageMandateResponse:
+    # Reuse the _manage helper with CHANGE_PLAN action and action_details carrying the new plan.
+    inner = ManageMandateRequest(
+        merchant_id=request.merchant_id,
+        idempotency_key=request.idempotency_key,
+        psp_mandate_ref=request.psp_mandate_ref,
+    )
+    return await self._manage(
+        inner,
+        action="CHANGE_PLAN",
+        action_details={"plan_id": request.new_plan_id},
+    )
+
+
 async def _manage(
     self,
     request: ManageMandateRequest,
     action: str,
+    action_details: dict | None = None,
 ) -> ManageMandateResponse:
     # Build the action payload; field names are PSP-specific (see connector_docs/<psp>.md).
     action_payload: dict = {"action": action}
+    if action_details is not None:
+        action_payload["action_details"] = action_details
     if request.reason is not None:
         action_payload["reason"] = request.reason
     # ACTIVATE only: schedule the next debit via next_scheduled_time
@@ -115,11 +137,19 @@ async def _manage(
 | Cause | Raise |
 |---|---|
 | 404 (mandate not found) | `ConnectorError(ORDER_NOT_FOUND)` |
-| 4xx "invalid state" (e.g. cancel an already-cancelled mandate) | `ConnectorError(INVALID_ORDER_STATE)` |
+| 409 / 422 "invalid state" (e.g. cancel an already-cancelled mandate) | `ConnectorError(INVALID_ORDER_STATE)` |
+| **400** (e.g. CHANGE_PLAN ceiling / PERIODIC-only violation) | flows through `_map_http_error` → `ConnectorError(INVALID_REQUEST)` |
 | 4xx auth | `ConnectorError(AUTHENTICATION_FAILED)` / `AUTHORIZATION_FAILED` |
 | 429 | `ConnectorError(RATE_LIMITED)` |
 | 5xx / network | `ConnectorError(PSP_UNAVAILABLE)` |
 | Wire shape validation fails | `ConnectorError(INTERNAL, psp_message=str(e))` |
+
+**Error-mapping note (CHANGE_PLAN):** a ceiling violation or PERIODIC-only rejection from the
+PSP arrives as **400**, which flows through `_map_http_error → INVALID_REQUEST`. This is the
+correct path. The `409/422 → INVALID_ORDER_STATE` shortcut in `_manage` is for cancel/pause/
+resume state errors **only** — do not describe 400 as a "state" error or route it through the
+409/422 shortcut. If a PSP ever returns 409 or 422 for a ceiling, it would be misclassified
+as `INVALID_ORDER_STATE`; flag that as a PSP-specific carve-out if needed.
 
 ## Required tests
 

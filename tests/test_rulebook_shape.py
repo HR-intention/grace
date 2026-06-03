@@ -190,3 +190,10 @@ def test_sync_subscription_pattern_pins_realized_rail_and_spelling() -> None:
     assert "realized_rail" in t
     # the webhook-vs-sync wire-key spelling may differ per PSP
     assert "spelling" in t.lower() or ("authorisation" in t and "authorization" in t)
+
+
+def test_manage_mandate_pattern_pins_change_plan() -> None:
+    t = _MANAGE_MANDATE_TEXT
+    assert "CHANGE_PLAN" in t and "action_details" in t and "plan_id" in t
+    # ceiling rejection arrives as 400 → _map_http_error, NOT the 409/422 state shortcut
+    assert "400" in t
