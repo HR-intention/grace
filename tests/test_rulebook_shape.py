@@ -26,6 +26,7 @@ _RSYNC_TEXT = (P / "pattern_rsync.md").read_text()
 _SYNC_SUBSCRIPTION_TEXT = (P / "pattern_sync_subscription.md").read_text()
 _MANDATE_WEBHOOK_TEXT = (P / "pattern_mandate_webhook.md").read_text()
 _INCOMING_WEBHOOK_TEXT = (P / "pattern_IncomingWebhook_flow.md").read_text()
+_CREATE_PLAN_TEXT = (P / "pattern_create_plan.md").read_text()
 
 
 def test_webhook_rule_is_shared_router_not_connector_method() -> None:
@@ -197,3 +198,12 @@ def test_manage_mandate_pattern_pins_change_plan() -> None:
     assert "CHANGE_PLAN" in t and "action_details" in t and "plan_id" in t
     # ceiling rejection arrives as 400 → _map_http_error, NOT the 409/422 state shortcut
     assert "400" in t
+
+
+def test_create_plan_pattern_pins_rules() -> None:
+    t = _CREATE_PLAN_TEXT
+    assert "/plans" in t                                 # POST /plans
+    assert "PERIODIC" in t                               # plan_type constant
+    assert "merchant_plan_id" in t and "idempotency_key" in t   # deterministic plan_id
+    assert "minor_units" in t                            # major-unit conversion
+    assert "CreatePlanResponse" in t
