@@ -168,3 +168,11 @@ def test_incoming_webhook_pattern_requires_classify_tests() -> None:
     assert "_classify" in t
     # Should test both payment and mandate family routing
     assert "MANDATE" in t and "PAYMENT" in t
+
+
+def test_create_subscription_pattern_pins_rails_union() -> None:
+    t = _CREATE_SUBSCRIPTION_TEXT
+    assert "rails" in t                      # plural request field
+    assert "request.rail:" not in t          # singular form removed
+    assert "NOT_SUPPORTED" in t              # reject unsupported rails
+    assert "exclude_none" in t or "omit" in t.lower()   # None/empty ⇒ omit, never []
