@@ -186,7 +186,7 @@ def _create_subscription_request() -> CreateSubscriptionRequest:
     return CreateSubscriptionRequest(
         merchant_id="MERCHANT_123",
         idempotency_key="idem-mandate-1",
-        rail=MandateRail.UPI_AUTOPAY,
+        rails=[MandateRail.UPI_AUTOPAY],
         customer_ref="cust-ref-1",
         customer_contact=CustomerContact(email="test@example.com", phone="9999999999"),
         amount=Amount(minor_units=100000, currency=Currency.INR),

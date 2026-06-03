@@ -13,6 +13,7 @@ _STATUS_MAPPING_TEXT = (R / "status_mapping.md").read_text()
 _DOMAIN_TYPES_TEXT = (R / "domain_types.md").read_text()
 _PITFALLS_TEXT = (R / "pitfalls.md").read_text()
 _TESTING_TEXT = (R / "testing.md").read_text()
+_FILE_LAYOUT_TEXT = (R / "file_layout.md").read_text()
 
 P = Path("rulesbook/codegen/guides/patterns")
 
@@ -226,3 +227,11 @@ def test_status_mapping_pins_raw_preserving_many_to_few() -> None:
     sm = _STATUS_MAPPING_TEXT
     assert "payment_group" in sm and "MandateRail" in sm
     assert "raw" in sm.lower()        # preserve the raw value alongside the normalized one
+
+
+def test_bundled_core_docs_use_new_mandate_contract() -> None:
+    # testing.md fixture must use the plural rails field, not singular rail=
+    assert "rails=" in _TESTING_TEXT
+    assert "rail=MandateRail" not in _TESTING_TEXT
+    # file_layout.md must enumerate the plan-management methods
+    assert "create_plan" in _FILE_LAYOUT_TEXT and "change_plan" in _FILE_LAYOUT_TEXT

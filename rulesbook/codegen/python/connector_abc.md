@@ -98,7 +98,7 @@ Do **not** add extra parameters or change return types.
 
 ## Domain mixin: `<Psp>Subscriptions(_<Psp>Base, MandateConnector)`
 
-Implements the five lifecycle methods + four introspection methods. Lives in
+Implements the five lifecycle methods + two plan-management methods + four introspection methods. Lives in
 `subscriptions/connector.py`.
 
 ```python
