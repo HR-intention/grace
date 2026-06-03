@@ -36,7 +36,7 @@ _ROOT_FILES = frozenset({"connector.py", "webhooks.py", "__init__.py"})
 # Filename stems / substrings that map to an orders domain.
 _ORDERS_KEYWORDS = ("create_order", "sync_payment", "refund", "sync_refund")
 # Filename stems / substrings that map to a subscriptions domain.
-_SUBSCRIPTIONS_KEYWORDS = ("subscription", "mandate")
+_SUBSCRIPTIONS_KEYWORDS = ("subscription", "mandate", "plan")
 # Filename stems / substrings that map to the root (cross-domain webhook router).
 _ROOT_KEYWORDS = ("webhook_router", "webhook")
 
