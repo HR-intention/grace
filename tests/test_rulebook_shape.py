@@ -207,3 +207,10 @@ def test_create_plan_pattern_pins_rules() -> None:
     assert "merchant_plan_id" in t and "idempotency_key" in t   # deterministic plan_id
     assert "minor_units" in t                            # major-unit conversion
     assert "CreatePlanResponse" in t
+
+
+def test_domain_types_pins_rails_realized_and_plan_types() -> None:
+    dt = _DOMAIN_TYPES_TEXT
+    assert "rails: list[MandateRail]" in dt           # plural request field
+    assert "realized_rail" in dt and "payment_group" in dt
+    assert "CreatePlanRequest" in dt and "ChangePlanRequest" in dt
