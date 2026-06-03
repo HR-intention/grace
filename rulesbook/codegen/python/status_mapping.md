@@ -197,6 +197,72 @@ access. Never invent a `PaymentMethod` member.
 
 ---
 
+## 7. Raw-preserving many→few mapping (`payment_group → MandateRail`)
+
+Some PSP fields are **coarser than the lens enum** — many raw values collapse to fewer enum
+members. When this happens, preserve the raw source string alongside the normalized enum so
+that callers retain the finer-grained information.
+
+**Example: `payment_group → MandateRail`**
+
+The PSP may return a `payment_group` string in its authorization block (e.g. `"upi"`,
+`"enach"`, `"pnach"`, `"card"`, `"debit_card"`). The lens `MandateRail` enum has only two
+members (`UPI_AUTOPAY`, `CARD_EMANDATE`), so multiple PSP groups collapse to the same enum
+value. The raw `payment_group` must be kept on the event/response separately.
+
+```python
+# subscriptions/status_map.py
+from lens.enums import MandateRail
+import structlog
+
+_log = structlog.get_logger(__name__)
+
+# Many→few: multiple PSP groups collapse to two MandateRail members.
+# Case-insensitive matching; unknown non-empty → None + warning; raw string preserved separately.
+_PAYMENT_GROUP_MAP: dict[str, MandateRail] = {
+    "upi":        MandateRail.UPI_AUTOPAY,
+    "enach":      MandateRail.CARD_EMANDATE,
+    "pnach":      MandateRail.CARD_EMANDATE,
+    "card":       MandateRail.CARD_EMANDATE,
+    "debit_card": MandateRail.CARD_EMANDATE,
+}
+
+
+def map_payment_group_to_rail(payment_group: str | None) -> MandateRail | None:
+    """Map a PSP payment-group string to a MandateRail enum value.
+
+    Returns None for absent/empty/unknown groups. Warns on unknown non-empty values.
+    The caller is responsible for preserving the raw payment_group string alongside
+    the returned enum — the enum is coarser and the raw value carries finer detail.
+    """
+    if not payment_group:
+        return None
+    mapped = _PAYMENT_GROUP_MAP.get(payment_group.lower())
+    if mapped is not None:
+        return mapped
+    _log.warning("unknown_payment_group", value=payment_group)
+    return None
+```
+
+**Calling pattern** (in `_parse_mandate_webhook` or `sync_subscription`):
+
+```python
+# Do NOT discard the raw payment_group — preserve it on the event:
+raw_group: str | None = ...   # from the PSP auth block
+realized_rail = map_payment_group_to_rail(raw_group)
+event = MandateWebhookEvent(
+    ...
+    realized_rail=realized_rail,          # normalized (may be None for unknown)
+    payment_group=raw_group,              # raw string preserved (keeps enach/pnach/card distinction)
+    authorization_reference=...,
+)
+```
+
+**Why preserve the raw value?** `MandateRail.CARD_EMANDATE` collapses `enach`, `pnach`,
+`card`, and `debit_card`. The raw `payment_group` string retains the distinction — Orbit
+may need it for analytics or routing. Always set `payment_group` from the raw PSP value,
+regardless of whether `map_payment_group_to_rail` succeeded.
+
 ## Rules
 
 - **Read the PSP's docs for the full status list.** Don't guess. Every status and event type

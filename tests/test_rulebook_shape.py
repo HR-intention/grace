@@ -220,3 +220,9 @@ def test_connector_abc_pins_plan_methods() -> None:
     t = _CONNECTOR_ABC_TEXT
     assert "create_plan" in t and "change_plan" in t
     assert "CreatePlanRequest" in t            # the mixin imports it
+
+
+def test_status_mapping_pins_raw_preserving_many_to_few() -> None:
+    sm = _STATUS_MAPPING_TEXT
+    assert "payment_group" in sm and "MandateRail" in sm
+    assert "raw" in sm.lower()        # preserve the raw value alongside the normalized one
