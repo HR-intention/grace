@@ -21,7 +21,6 @@ def test_domain_of_test_path_takes_precedence() -> None:
 
 
 def test_plan_management_test_buckets_subscriptions() -> None:
-    from grace.pipeline.domain_breakdown import domain_of_test
     assert domain_of_test("tests/test_plan_management.py") == "subscriptions"
 
 
