@@ -120,6 +120,7 @@ class CreateSubscriptionRequest(MandateRequestCommon):
     idempotency_key: str           # REQUIRED — forward as PSP idempotency token
     rails: list[MandateRail] | None = None   # customer-chosen allow-list; None = PSP default
     customer_ref: str
+    customer_name: str
     customer_contact: CustomerContact   # REQUIRED — email + phone both required
     amount: Amount
     max_amount: Amount

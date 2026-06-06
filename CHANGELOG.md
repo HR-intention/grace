@@ -4,6 +4,23 @@ Notable changes to the Grace codegen tool. Grace follows SemVer; per Orbit Const
 a rulebook/template change that alters generated-code shape is a **major** bump (expressed
 pre-1.0 as a `0.x` increment). The §4 generated-file marker records the Grace version used.
 
+## 0.9.1 — 2026-06-06
+
+`create_subscription`: map `CreateSubscriptionRequest.customer_name` (new required lens field,
+lens 0.6.1) into the PSP customer block.
+
+- **`pattern_create_subscription.md`**: add `request.customer_name: str` (required) to the input
+  field list and `customer_name=request.customer_name` to the `<Psp>CustomerDetails(...)` mapping.
+- **`rulesbook/codegen/python/testing.md`**: add `customer_name` to the `_create_subscription_request`
+  fixture and the "all fields forwarded" assertion list (else generated fixtures fail on the now-required field).
+- **`rulesbook/codegen/python/domain_types.md`** and **`SUBPROJECT_LENS.md` §4.4**:
+  `CreateSubscriptionRequest` gains `customer_name: str`.
+- Regenerate Cashfree (`grace generate cashfree`) so the connector forwards `customer_name` to
+  `customer_details.customer_name` and the generated subscription fixtures supply it.
+
+Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
+generated-shape change as a `0.x`-position bump.
+
 ## 0.9.0 — 2026-06-03
 
 Customer-chosen mandate rail + plan upgrade/downgrade — reproduce the lens 0.3.0 / 0.4.0
