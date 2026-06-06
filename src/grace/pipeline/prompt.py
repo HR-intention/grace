@@ -778,6 +778,55 @@ _POST_CHECK_TYPING = """\
 
 
 # ---------------------------------------------------------------------------
+# Execution-based verification block (pytest + mypy, run-fix-rerun loop)
+# ---------------------------------------------------------------------------
+
+_EXECUTION_VERIFICATION = """\
+╔══════════════════════════════════════════════════════════════════════╗
+║ MANDATORY EXECUTION VERIFICATION — RUN, FIX, RERUN UNTIL GREEN       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+After completing the grep-based structural self-check above, you MUST run
+the following two commands from the OUTPUT DIRECTORY (your cwd) and iterate
+until BOTH exit with code 0. Do not exit before both are clean.
+
+STEP 1 — mypy strict check on the generated connector package AND its tests:
+
+    Bash("mypy --strict . tests/")
+
+  - Fix every error mypy reports: missing type annotations, incompatible
+    argument types, bare `dict`/`list` generics, unknown attributes, etc.
+  - Re-run mypy after each fix until it reports: "Success: no issues found".
+
+STEP 2 — pytest on the generated test directory:
+
+    Bash("python -m pytest tests/ -v")
+
+  - Fix every failure and error pytest reports.
+  - Re-run pytest after each fix until ALL tests pass (0 failures, 0 errors).
+
+HARD GUARD — HOW TO FIX FAILURES:
+
+  ✓ Fix the CONNECTOR code if a test exposes a bug in a flow method, a wrong
+    field name, a missing mapping, or a bad response construction.
+  ✓ Fix fixture DATA if a required field changed (e.g. a new required request
+    field was added to the lens domain type) — update the fixture to supply it.
+
+  ✗ NEVER weaken a test to make it pass:
+      - Do NOT remove an assertion.
+      - Do NOT replace a specific value-check with a truthy/None check.
+      - Do NOT skip or xfail a test.
+      - Do NOT delete a test function.
+      - Do NOT loosen a type annotation to silence mypy.
+    If a test asserts that `customer_name` is forwarded to the PSP payload, and
+    the connector does not forward it, fix the CONNECTOR — not the assertion.
+
+  If you genuinely cannot fix a failure (e.g. the PSP API definition in the
+  source doc is ambiguous), leave a concise inline comment in the affected
+  test explaining why, and continue — do NOT delete or skip the test."""
+
+
+# ---------------------------------------------------------------------------
 # Full prompt template
 # ---------------------------------------------------------------------------
 
@@ -827,6 +876,8 @@ file) and `glob` to filter.
 
 {typing_check}
 
+{execution_verification}
+
 ╔══════════════════════════════════════════════════════════════════════╗
 ║ CONTEXT FILES                                                         ║
 ╚══════════════════════════════════════════════════════════════════════╝
@@ -854,7 +905,9 @@ Lens version constraint: {lens_version_constraint}
 Domain scope: {domain}
 
 Generate the package. Do not ask follow-up questions. Write the files, run
-the post-generation self-check above against your own output, then exit.
+the post-generation self-check above against your own output, then run mypy
+and pytest as instructed in the MANDATORY EXECUTION VERIFICATION section and
+fix until both are fully green. Only then exit.
 """
 
 
@@ -934,6 +987,7 @@ def build_prompt(ctx: GenerationContext) -> str:
         class_shape_block=_class_shape_for_domain(domain),
         self_check_block=_self_check_for_domain(domain),
         typing_check=_POST_CHECK_TYPING,
+        execution_verification=_EXECUTION_VERIFICATION,
         rulebook_block=rulebook_block,
         source_block=source_block,
         target_module=ctx.target_module,

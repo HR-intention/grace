@@ -23,6 +23,14 @@ lens 0.6.1) into the PSP customer block.
   prompt's base example + `_SELF_CHECK_CORE` grep (now asserts `build_http_client` present / raw
   `httpx.AsyncClient(` absent), `connector_abc.md`, `pitfalls.md`, `file_layout.md`, `README.md`.
   Generated `__init__` preserves `timeout=30.0` + the `base_url_override` branch.
+- **Generation agent now self-verifies with pytest + mypy before exiting.** A new `MANDATORY
+  EXECUTION VERIFICATION` section in the generation prompt instructs the agent to run
+  `mypy --strict . tests/` and `python -m pytest tests/ -v` on its own output, fix every reported
+  error/failure, and rerun until both exit clean — before it exits. A hard guard explicitly
+  prohibits fixing failures by weakening, skipping, or deleting assertions; broken connector logic
+  must be fixed in the connector. This catches attribute errors and missing required fields in
+  generated tests (e.g. `CreateSubscriptionRequest.CustomerContact` or dropped `customer_ref`)
+  that grep-only structural checks cannot detect.
 
 Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
 generated-shape change as a `0.x`-position bump.
