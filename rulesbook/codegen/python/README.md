@@ -65,7 +65,7 @@ Then read the per-flow patterns under `../guides/patterns/`:
   connector method.
 - **`MandateConnector` is singular.** `MandatesConnector` does not exist.
 - **Modern typing throughout.** No `Dict`/`List`/`Optional`/`Set` from `typing`.
-- **One `httpx.AsyncClient`**, owned by `_<Psp>Base`.
+- **One `httpx.AsyncClient`**, built (via `lens.http.build_http_client`) and owned by `_<Psp>Base`.
 - `mypy --strict` clean. `pytest --cov` ≥ 80%.
 - Every `.py` file starts with the §4 marker.
 - No PSP-specific logic in the generic rulebook — use `<Psp>` placeholders. Per-PSP

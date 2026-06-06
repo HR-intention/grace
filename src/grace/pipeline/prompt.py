@@ -139,15 +139,16 @@ core/base.py — _<Psp>Base(Connector)
 
          def __init__(self, config: ConnectorConfig) -> None:
              self._config = config
-             self._client = httpx.AsyncClient(
+             self._client = build_http_client(                      # from lens.http import build_http_client
                  base_url=str(config.base_url_override) if config.base_url_override else self.base_url,
+                 connector_name=self.name,
                  timeout=30.0,
              )
 
          async def close(self) -> None:
              await self._client.aclose()
 
-   ONE httpx.AsyncClient per instance, built in _<Psp>Base.__init__, shared by all mixins.
+   ONE client per instance, built via lens.http.build_http_client in _<Psp>Base.__init__ (it adds outbound logging), shared by all mixins.
    NEVER build a second client in a domain mixin."""
 
 _CLASS_SHAPE_ORDERS = """\
@@ -215,8 +216,10 @@ _SELF_CHECK_CORE = """\
         → present
     Grep(pattern="from lens.connector import Connector", path=<cwd>/core, glob="base.py")
         → present
-    Grep(pattern="httpx.AsyncClient", path=<cwd>/core, glob="base.py")
-        → exactly one match
+    Grep(pattern="build_http_client", path=<cwd>/core, glob="base.py")
+        → present (the client is built via lens.http.build_http_client)
+    Grep(pattern="httpx.AsyncClient(", path=<cwd>/core, glob="base.py")
+        → no matches (never construct the client directly; build_http_client wraps it)
     Grep(pattern="async def close", path=<cwd>/core, glob="base.py")
         → present
 

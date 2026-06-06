@@ -18,6 +18,12 @@ lens 0.6.1) into the PSP customer block.
 - Regenerate Cashfree (`grace generate cashfree`) so the connector forwards `customer_name` to
   `customer_details.customer_name` and the generated subscription fixtures supply it.
 
+- **`_<Psp>Base` builds its client via `lens.http.build_http_client`** (not raw `httpx.AsyncClient`),
+  so generated connectors get outbound request/response logging (lens 0.6.1). Updated: the generation
+  prompt's base example + `_SELF_CHECK_CORE` grep (now asserts `build_http_client` present / raw
+  `httpx.AsyncClient(` absent), `connector_abc.md`, `pitfalls.md`, `file_layout.md`, `README.md`.
+  Generated `__init__` preserves `timeout=30.0` + the `base_url_override` branch.
+
 Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
 generated-shape change as a `0.x`-position bump.
 

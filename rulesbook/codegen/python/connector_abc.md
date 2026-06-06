@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from lens.connector import Connector
 from lens.factory import ConnectorConfig
+from lens.http import build_http_client
 import httpx
 
 
@@ -43,8 +44,9 @@ class _<Psp>Base(Connector):
 
     def __init__(self, config: ConnectorConfig) -> None:
         self._config = config
-        self._client = httpx.AsyncClient(
+        self._client = build_http_client(
             base_url=str(config.base_url_override) if config.base_url_override else self.base_url,
+            connector_name=self.name,
             timeout=30.0,
         )
 
