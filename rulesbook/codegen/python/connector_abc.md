@@ -225,7 +225,7 @@ The composed class has zero leftover abstract methods; it passes `ConnectorFacto
    (`ConnectorFactory.register("<psp>", <Psp>Connector)`).
 2. **`base_url` is a `@property`.** Hard-code the sandbox URL in `_<Psp>Base`; apply
    `config.base_url_override` at `__init__` time.
-3. **One `httpx.AsyncClient`, built in `_<Psp>Base.__init__`.** Never build a second client
+3. **One client (via `lens.http.build_http_client`), built in `_<Psp>Base.__init__`.** Never build a second client
    in a domain mixin.
 4. **`__init__` takes a single `ConnectorConfig`.** Build the client there; do not call
    `.expose()` on optional credentials — defer that to call time.
