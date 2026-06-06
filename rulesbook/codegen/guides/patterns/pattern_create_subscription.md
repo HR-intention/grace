@@ -32,6 +32,7 @@ See `../python/domain_types.md` for the locked shapes. Highlights:
 - `request.expires_at: datetime` — mandate expiry.
 - `request.max_cycles: int | None` — cap on the number of debits; `None` = unlimited (or
   until `expires_at`).
+- `request.customer_name: str` — **required**; the customer's name, passed to the PSP's customer block.
 - `request.customer_contact.email: str` — **required**; passed to the PSP's customer block.
 - `request.customer_contact.phone: str` — **required**; passed to the PSP's customer block.
   Both fields are always present (`CustomerContact` forbids extras and both are non-optional).
@@ -69,6 +70,7 @@ async def create_subscription(
         customer_details=<Psp>CustomerDetails(
             customer_email=request.customer_contact.email,
             customer_phone=request.customer_contact.phone,
+            customer_name=request.customer_name,
         ),
         # Plan / schedule block
         plan=<Psp>PlanDetails(

@@ -92,7 +92,7 @@ tests/
   blocker — the PSP rejects it.)
 - **Explicit authorization amount forwarded**: pass `authorization_amount=Amount(minor_units=50000, currency=Currency.INR)`
   and `authorization_amount_refund=False`; assert the wire request carries `500.0` and `False`.
-- **All `CreateSubscriptionRequest` fields forwarded**: `customer_contact.email`,
+- **All `CreateSubscriptionRequest` fields forwarded**: `customer_name`, `customer_contact.email`,
   `customer_contact.phone`, `first_charge_at`, `description`, `return_url`, `upi_vpa`,
   `idempotency_key` — assert the mock received them in the wire request.
 
@@ -188,6 +188,7 @@ def _create_subscription_request() -> CreateSubscriptionRequest:
         idempotency_key="idem-mandate-1",
         rails=[MandateRail.UPI_AUTOPAY],
         customer_ref="cust-ref-1",
+        customer_name="Test Customer",
         customer_contact=CustomerContact(email="test@example.com", phone="9999999999"),
         amount=Amount(minor_units=100000, currency=Currency.INR),
         max_amount=Amount(minor_units=500000, currency=Currency.INR),

@@ -441,6 +441,7 @@ class CreateSubscriptionRequest(MandateRequestCommon):
     idempotency_key: str
     rails: list[MandateRail] | None = None         # None/empty = offer all supported instruments
     customer_ref: str
+    customer_name: str
     customer_contact: CustomerContact
     amount: Amount
     max_amount: Amount
