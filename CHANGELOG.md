@@ -32,6 +32,16 @@ lens 0.6.1) into the PSP customer block.
   generated tests (e.g. `CreateSubscriptionRequest.CustomerContact` or dropped `customer_ref`)
   that grep-only structural checks cannot detect.
 
+- **Body-idempotent marker de-churn:** after each generation run, a new de-churn
+  pass compares every emitted `.py` file's marker-stripped body against the last-committed
+  version in git HEAD. If the body is byte-identical the file is silently restored to HEAD's
+  exact content (reverting the timestamp/version churn), so `git diff` only shows files with
+  real code changes. New files and files outside any git repo keep their fresh markers. The
+  pass is best-effort: any git error is logged at DEBUG and skipped — the pipeline never
+  crashes. Covers both connector files under `output_dir` and relocated test files under
+  `<tests_dir>/<psp>/`. Implemented in `pipeline/marker.py` (`extract_body`,
+  `dechurn_if_unchanged`) and wired into `pipeline/orchestrate.py` after `_relocate_tests`.
+
 Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
 generated-shape change as a `0.x`-position bump.
 

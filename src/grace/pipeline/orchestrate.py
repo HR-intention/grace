@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from grace.pipeline.marker import ensure_marker
+from grace.pipeline.marker import dechurn_if_unchanged, ensure_marker
 from grace.pipeline.types import GenerationContext, GenerationResult
+
+_log = logging.getLogger(__name__)
 
 
 class _RunnerProto(Protocol):
@@ -32,6 +36,31 @@ def relocated_tests_path(ctx: GenerationContext) -> Path | None:
     if ctx.tests_dir is None:
         return None
     return ctx.tests_dir / ctx.psp_name
+
+
+def _git_root_for(path: Path) -> Path | None:
+    """Return the git repository root that contains *path*, or None if not in a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return Path(result.stdout.strip())
+    except Exception as exc:  # pragma: no cover
+        _log.debug("_git_root_for: could not determine git root for %s: %s", path, exc)
+    return None
+
+
+def _dechurn_files(paths: list[Path]) -> None:
+    """Run the de-churn pass over a list of .py files (best-effort, never raises)."""
+    for p in paths:
+        git_root = _git_root_for(p)
+        if git_root is None:
+            _log.debug("dechurn: %s is not in a git repo, skipping", p)
+            continue
+        dechurn_if_unchanged(p, git_root)
 
 
 def _relocate_tests(ctx: GenerationContext) -> Path | None:
@@ -90,7 +119,15 @@ async def run_pipeline(
             source_uri=ctx.psp_docs.source_uri,
         )
 
-    _relocate_tests(ctx)
+    relocated = _relocate_tests(ctx)
+
+    # De-churn pass: restore files whose marker changed but body did not.
+    # Covers both connector output_dir and relocated tests directory (if any).
+    connector_pys = list(result.output_dir.rglob("*.py"))
+    test_pys: list[Path] = []
+    if relocated is not None and relocated.is_dir():
+        test_pys = list(relocated.rglob("*.py"))
+    _dechurn_files(connector_pys + test_pys)
 
     if hooks.run_gates:
         from grace.pipeline.gates import run_gates_blocking
