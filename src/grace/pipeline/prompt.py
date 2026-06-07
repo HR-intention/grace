@@ -228,8 +228,21 @@ _SELF_CHECK_CORE = """\
         → at least one match
     Grep(pattern="hmac.compare_digest", path=<cwd>/core, glob="auth.py")
         → present
+    Grep(pattern="config: ConnectorConfig", path=<cwd>/core, glob="auth.py")
+        → present  (verify_signature's signature is LOCKED to
+                    (config: ConnectorConfig, raw_payload: bytes, headers: dict[str, str]) -> bool;
+                    grace generates the call site `verify_signature(config, raw, headers)`)
+    Grep(pattern="webhook_secret: Maskable", path=<cwd>/core, glob="auth.py")
+        → ZERO matches  (do NOT add a webhook_secret parameter to verify_signature;
+                         resolve config.webhook_secret.expose() INSIDE the function)
     Grep(pattern="WEBHOOK_SIGNATURE_FAILED", path=<cwd>, glob="*.py", output_mode="count")
-        → at least one match (in webhooks.py or core/auth.py)"""
+        → at least one match (in webhooks.py or core/auth.py)
+
+  TESTS — SHARED FIXTURE IMPORTS:
+    Grep(pattern="from lens\\.connectors\\..*\\.tests", path=<cwd>/tests, glob="*.py")
+        → ZERO matches  (import shared fixtures RELATIVELY: `from .conftest import ...`.
+                         the tests/ tree is relocated OUT of the package, so the absolute
+                         `lens.connectors.<psp>.tests.*` path will not resolve.)"""
 
 _SELF_CHECK_ORDERS = """\
   ORDERS CONNECTOR:
@@ -846,7 +859,13 @@ above (e.g. `tests/test_<flow>.py`). Grace's pipeline relocates
 `<output_dir>/tests/` to the consumer's configured `paths.tests_dir/<psp>/`
 after generation — do NOT write that final path yourself. If you write
 `tests/integration/connectors/<psp>/…` the relocation will double the path
-and pytest will collect 0 tests (0% coverage)."""
+and pytest will collect 0 tests (0% coverage).
+
+Because the tests move OUT of the package, import shared fixtures with a RELATIVE
+import — `from .conftest import make_mock_transport, ...` — NEVER the absolute
+`from lens.connectors.<psp>.tests.conftest import ...` (that module stops existing
+after relocation). Absolute *connector* imports stay absolute; only `…tests…`
+imports must be relative."""
 
 
 PROMPT_TEMPLATE = """\
@@ -910,10 +929,19 @@ Source version: {source_version}
 Lens version constraint: {lens_version_constraint}
 Domain scope: {domain}
 
-Generate the package. Do not ask follow-up questions. Write the files, run
-the post-generation self-check above against your own output, then run mypy
-and pytest as instructed in the MANDATORY EXECUTION VERIFICATION section and
-fix until both are fully green. Only then exit.
+Generate the package. You are running NON-INTERACTIVELY (headless `claude -p`):
+there is NO human to answer a question or grant a tool/approval prompt — asking
+or waiting stalls the run forever. Therefore:
+  - NEVER ask a follow-up or clarifying question, and never pause for confirmation.
+    If a detail is ambiguous, follow the rulebook / connector_docs; if it is still
+    unspecified, choose the most reasonable default and proceed, leaving a brief
+    inline comment noting the assumption. Make the call yourself — do not stop.
+  - Use your tools (Read / Edit / Write / Bash) directly — permissions are
+    pre-granted; never wait for approval. Run Bash commands (pytest, mypy, grep)
+    without hesitation.
+Write the files, run the post-generation self-check above against your own output,
+then run mypy and pytest as instructed in the MANDATORY EXECUTION VERIFICATION
+section and fix until both are fully green. Only then exit.
 """
 
 

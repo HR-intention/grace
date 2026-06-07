@@ -63,12 +63,41 @@ def _dechurn_files(paths: list[Path]) -> None:
         dechurn_if_unchanged(p, git_root)
 
 
+def _rewrite_in_package_test_imports(dest: Path, target_module: str | None) -> None:
+    """Rewrite absolute in-package test imports to relative after relocation.
+
+    Generated tests often import shared helpers via the absolute in-package path
+    (``from lens.connectors.<psp>.tests.conftest import ...``). Once the tests are
+    relocated OUT of the package that module no longer exists, so those imports
+    must become relative (``from .conftest import ...``). Only the ``.tests``
+    segment is rewritten — real connector imports
+    (``lens.connectors.<psp>.orders...``) are left untouched.
+
+    This makes import correctness a property of the deterministic pipeline rather
+    than of the LLM's import-style choice on any given run.
+    """
+    if not target_module:
+        return
+    prefix = f"{target_module}.tests"
+    for py in dest.rglob("*.py"):
+        text = py.read_text()
+        if prefix not in text:
+            continue
+        rewritten = text.replace(f"from {prefix}.", "from .").replace(
+            f"from {prefix} import", "from . import"
+        )
+        if rewritten != text:
+            py.write_text(rewritten)
+
+
 def _relocate_tests(ctx: GenerationContext) -> Path | None:
     """If `ctx.tests_dir` is set, move `<output_dir>/tests/` to
     `<tests_dir>/<psp_name>/`. Returns the new tests root, or None if
     relocation wasn't configured / there were no tests to move.
 
     Overwrites an existing destination so `grace regenerate` is idempotent.
+    After the move, absolute in-package test imports are rewritten to relative
+    so the tests resolve from their new out-of-package location.
     """
     dest = relocated_tests_path(ctx)
     if dest is None:
@@ -80,6 +109,7 @@ def _relocate_tests(ctx: GenerationContext) -> Path | None:
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dest))
+    _rewrite_in_package_test_imports(dest, ctx.target_module)
     return dest
 
 

@@ -137,6 +137,13 @@ def verify_signature(
 - Resolve `config.webhook_secret.expose()` at call time, never at construction time.
 - Do **not** decode `raw_payload` before computing the signature.
 - Document the algorithm and the signed-data format in a comment on `verify_signature`.
+- **🔒 LOCKED SIGNATURE — do not change.** Grace generates the *call site* for you in the
+  compose surface (`webhooks.py`): `verify=lambda raw, headers: verify_signature(config, raw, headers)`.
+  So `verify_signature` MUST take exactly `(config: ConnectorConfig, raw_payload: bytes,
+  headers: dict[str, str]) -> bool`, in that order. Do NOT pull the secret out into a parameter
+  (e.g. `webhook_secret: Maskable[str]`), add parameters, or reorder them — resolve the secret
+  INSIDE the function via `config.webhook_secret.expose()`. Any other signature breaks the
+  grace-generated caller and fails the mypy gate.
 
 ## Registration (in `__init__.py`)
 

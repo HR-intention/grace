@@ -346,8 +346,14 @@ class ClaudeCodeRunner:
         proc = await asyncio.create_subprocess_exec(
             str(binary),
             "-p",
+            # bypassPermissions (NOT acceptEdits): this is a headless `-p` run with
+            # stdin closed, so ANY tool that would prompt for approval hangs forever
+            # with no human to answer. `acceptEdits` only auto-approves file edits —
+            # the agent also runs Bash (the pytest/mypy self-verify loop, grep
+            # self-checks, uv), which would stall. Bypass all prompts; the agent
+            # works inside an isolated output_dir.
             "--permission-mode",
-            "acceptEdits",
+            "bypassPermissions",
             "--output-format",
             "stream-json",
             "--verbose",

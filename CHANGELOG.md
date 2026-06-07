@@ -57,6 +57,31 @@ lens 0.6.1) into the PSP customer block.
   feeds a webhook and asserts the parser returns the same ref; (f) `prompt.py`
   `_SELF_CHECK_SUBSCRIPTIONS` adds a `PSP_MANDATE_REF IDENTITY` self-check block.
 
+- **Headless generation no longer stalls on approval/question prompts.** The runner launched
+  Claude Code with `--permission-mode acceptEdits`, which auto-approves only file *edits* — so
+  every Bash command (the pytest/mypy self-verify loop, grep self-checks, `uv`) raised an
+  approval prompt that a non-interactive `-p` run (stdin closed) can never answer, hanging the
+  generation. Switched to `--permission-mode bypassPermissions` (`pipeline/runner.py`); the
+  agent works inside an isolated `output_dir`. Also hardened the generation prompt's closing
+  directive (`pipeline/prompt.py`): the agent is now told explicitly that it runs
+  NON-INTERACTIVELY — never ask a clarifying question, never wait for approval, pick the
+  documented / most-reasonable default and run to completion.
+
+- **Regen output now survives test relocation + locks the `verify_signature` contract.** A manual
+  regen produced 10 pytest collection errors + 3 mypy errors that the agent's self-verify missed
+  (it verifies the in-package layout *before* grace relocates tests and *before* grace writes the
+  compose surface). Both were LLM divergences from grace's deterministic contracts: (a) tests
+  imported shared fixtures by the absolute in-package path
+  (`from lens.connectors.<psp>.tests.conftest import`), which dies once `_relocate_tests` moves the
+  tree OUT of the package; (b) `core/auth.py`'s `verify_signature` was given a new
+  `(raw_payload, headers, webhook_secret)` signature, breaking the grace-generated caller
+  `verify_signature(config, raw, headers)` in the compose surface. Fixes: `_relocate_tests` now
+  rewrites `from <target_module>.tests[.x] import` → relative `from .x import` on move
+  (deterministic; only the `.tests` path is touched); `testing.md` documents relative conftest
+  imports; `pattern_IncomingWebhook_flow.md` + `webhook_handling.md` mark the `verify_signature`
+  signature LOCKED; and `prompt.py` self-checks reject absolute `…tests…` imports and assert the
+  config-first `verify_signature` signature.
+
 Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
 generated-shape change as a `0.x`-position bump.
 

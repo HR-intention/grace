@@ -57,6 +57,11 @@ def _build_verifier(config: ConnectorConfig) -> Callable[[bytes, dict[str, str]]
 full `ConnectorConfig` so it can access `config.webhook_secret.expose()` at call time (not at
 construction time — see pitfall 5b).
 
+**Its signature is locked to `verify_signature(config, raw_payload, headers) -> bool`** because
+Grace generates this exact call site for you (the compose surface in `webhooks.py`). Do not give
+`verify_signature` a different parameter list — no `webhook_secret` parameter, no reordering. See
+the LOCKED SIGNATURE note in `pattern_IncomingWebhook_flow.md`.
+
 ### Step 2 — `_classify` function
 
 ```python

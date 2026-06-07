@@ -235,6 +235,31 @@ def _create_subscription_request() -> CreateSubscriptionRequest:
 
 ---
 
+## Shared fixtures & imports
+
+Helpers used by more than one test file (`_config`, `make_mock_transport`,
+`build_*_connector`, response builders, …) live in **`tests/conftest.py`**.
+Import them into each test module with a **relative** import:
+
+```python
+from .conftest import make_mock_transport, build_orders_connector   # ✅ relative
+```
+
+NEVER import shared fixtures by their absolute in-package path:
+
+```python
+from lens.connectors.<psp>.tests.conftest import ...                 # ❌ forbidden
+```
+
+Grace relocates the whole `tests/` tree OUT of the connector package (the tests live
+next to the consumer's suite, not inside `lens/connectors/<psp>/`), so the
+`lens.connectors.<psp>.tests` module does not exist at runtime — only relative imports
+survive the move. Absolute *connector* imports
+(`from lens.connectors.<psp>.orders.connector import <Psp>Orders`) are correct and stay
+absolute; only the `…tests…` path must be relative.
+
+---
+
 ## Tamper-test pattern (safe mutation)
 
 ```python
