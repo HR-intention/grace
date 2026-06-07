@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import shutil
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from grace.pipeline.marker import ensure_marker
+from grace.pipeline.marker import dechurn_if_unchanged, ensure_marker
 from grace.pipeline.types import GenerationContext, GenerationResult
+
+_log = logging.getLogger(__name__)
 
 
 class _RunnerProto(Protocol):
@@ -34,12 +38,66 @@ def relocated_tests_path(ctx: GenerationContext) -> Path | None:
     return ctx.tests_dir / ctx.psp_name
 
 
+def _git_root_for(path: Path) -> Path | None:
+    """Return the git repository root that contains *path*, or None if not in a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return Path(result.stdout.strip())
+    except Exception as exc:  # pragma: no cover
+        _log.debug("_git_root_for: could not determine git root for %s: %s", path, exc)
+    return None
+
+
+def _dechurn_files(paths: list[Path]) -> None:
+    """Run the de-churn pass over a list of .py files (best-effort, never raises)."""
+    for p in paths:
+        git_root = _git_root_for(p)
+        if git_root is None:
+            _log.debug("dechurn: %s is not in a git repo, skipping", p)
+            continue
+        dechurn_if_unchanged(p, git_root)
+
+
+def _rewrite_in_package_test_imports(dest: Path, target_module: str | None) -> None:
+    """Rewrite absolute in-package test imports to relative after relocation.
+
+    Generated tests often import shared helpers via the absolute in-package path
+    (``from lens.connectors.<psp>.tests.conftest import ...``). Once the tests are
+    relocated OUT of the package that module no longer exists, so those imports
+    must become relative (``from .conftest import ...``). Only the ``.tests``
+    segment is rewritten — real connector imports
+    (``lens.connectors.<psp>.orders...``) are left untouched.
+
+    This makes import correctness a property of the deterministic pipeline rather
+    than of the LLM's import-style choice on any given run.
+    """
+    if not target_module:
+        return
+    prefix = f"{target_module}.tests"
+    for py in dest.rglob("*.py"):
+        text = py.read_text()
+        if prefix not in text:
+            continue
+        rewritten = text.replace(f"from {prefix}.", "from .").replace(
+            f"from {prefix} import", "from . import"
+        )
+        if rewritten != text:
+            py.write_text(rewritten)
+
+
 def _relocate_tests(ctx: GenerationContext) -> Path | None:
     """If `ctx.tests_dir` is set, move `<output_dir>/tests/` to
     `<tests_dir>/<psp_name>/`. Returns the new tests root, or None if
     relocation wasn't configured / there were no tests to move.
 
     Overwrites an existing destination so `grace regenerate` is idempotent.
+    After the move, absolute in-package test imports are rewritten to relative
+    so the tests resolve from their new out-of-package location.
     """
     dest = relocated_tests_path(ctx)
     if dest is None:
@@ -51,6 +109,7 @@ def _relocate_tests(ctx: GenerationContext) -> Path | None:
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dest))
+    _rewrite_in_package_test_imports(dest, ctx.target_module)
     return dest
 
 
@@ -90,7 +149,15 @@ async def run_pipeline(
             source_uri=ctx.psp_docs.source_uri,
         )
 
-    _relocate_tests(ctx)
+    relocated = _relocate_tests(ctx)
+
+    # De-churn pass: restore files whose marker changed but body did not.
+    # Covers both connector output_dir and relocated tests directory (if any).
+    connector_pys = list(result.output_dir.rglob("*.py"))
+    test_pys: list[Path] = []
+    if relocated is not None and relocated.is_dir():
+        test_pys = list(relocated.rglob("*.py"))
+    _dechurn_files(connector_pys + test_pys)
 
     if hooks.run_gates:
         from grace.pipeline.gates import run_gates_blocking

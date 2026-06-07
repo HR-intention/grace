@@ -45,7 +45,7 @@ webhooks.py (root)   — build_webhook_handlers(config: ConnectorConfig) -> Webh
                        Also defines _classify(raw: bytes) -> WebhookFamily.
 
 core/base.py         — _<Psp>Base(Connector). Implements name, base_url, close, __init__.
-                       Builds and owns the ONE httpx.AsyncClient. Stores _config.
+                       Builds (via `lens.http.build_http_client`) and owns the ONE httpx.AsyncClient. Stores _config.
                        This is the identity + lifecycle root for all domain mixins.
 
 core/auth.py         — Signing helpers. Credentials typed Maskable[str]. Functions:

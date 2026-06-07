@@ -144,3 +144,31 @@ psp_order_id=str(psp_resp.order_id or request.order_id),   # NOT cf_order_id
 Cashfree's `GET /pg/orders/{id}` (used by `sync_payment`) is keyed on the **merchant `order_id`**, so
 `create_order` and `sync_payment` must use the same identifier. Preferring `cf_order_id` makes
 `sync_payment` 404 (`ORDER_NOT_FOUND`).
+
+---
+
+## Subscriptions — `psp_mandate_ref` id mapping
+
+**`psp_mandate_ref` MUST be the merchant `subscription_id`** (the id sent in the create request,
+echoed back as `subscription_id` in responses and webhooks) — **NOT `cf_subscription_id`**
+(Cashfree's auto-generated internal id).
+
+Cashfree's action APIs are keyed on the merchant id:
+- `GET /subscriptions/{subscription_id}`
+- `POST /subscriptions/{subscription_id}/manage`
+
+Using `cf_subscription_id` instead causes `subscription_not_found` on every action call and breaks
+webhook correlation (webhooks carry `subscription_id`, not `cf_subscription_id`).
+
+Apply in:
+- `create_subscription` response: `psp_mandate_ref = psp_resp.subscription_id` (NOT `cf_subscription_id`)
+- `_parse_mandate_webhook` — every branch: `psp_mandate_ref = psp_event.subscription_id`
+- Action-API URL path: `/subscriptions/{request.psp_mandate_ref}/manage`
+
+```python
+# create_subscription — correct:
+psp_mandate_ref=psp_resp.subscription_id      # merchant id — action-API keyed on this
+
+# WRONG — silently breaks sync/cancel/pause/resume and webhook correlation:
+# psp_mandate_ref=psp_resp.cf_subscription_id
+```

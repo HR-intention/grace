@@ -76,7 +76,11 @@ def _parse_mandate_webhook(raw: bytes) -> MandateWebhookEvent:
     # 4. Build and return MandateWebhookEvent.
     return MandateWebhookEvent(
         event_type=event_type,
-        psp_mandate_ref=psp_event.<psp_subscription_id_field>,
+        # psp_mandate_ref MUST equal create_subscription's psp_mandate_ref for the same
+        # subscription: use the merchant subscription id (the /subscriptions/{id} path key),
+        # NEVER the PSP's internal id (e.g. cf_* / psp_* ids). Apply consistently across
+        # ALL branches of this function. See CORE RULE in pattern_create_subscription.md.
+        psp_mandate_ref=psp_event.<psp_subscription_id_field>,   # merchant id, same as create
         psp_event_id=psp_event.<psp_event_id_field>,
         occurred_at=psp_event.<event_time_field>,
         mandate_status=_map_mandate_status(psp_event),  # None if absent from this event
@@ -90,7 +94,8 @@ def _to_debit_outcome(psp_event: <Psp>MandateWebhookEvent) -> MandateDebitOutcom
     status, failure_code = map_debit_status(payment.payment_status)  # status_map.py
     return MandateDebitOutcome(
         psp_debit_id=payment.<psp_payment_id_field>,
-        psp_mandate_ref=psp_event.<psp_subscription_id_field>,
+        # Same merchant subscription id as in _parse_mandate_webhook above — NEVER internal id.
+        psp_mandate_ref=psp_event.<psp_subscription_id_field>,   # merchant id, NOT internal id
         status=status,
         amount=Amount(
             minor_units=int(Decimal(payment.payment_amount) * 100),

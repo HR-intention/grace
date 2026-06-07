@@ -136,7 +136,11 @@ class CreateSubscriptionRequest(MandateRequestCommon):
 
 class CreateSubscriptionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=False)
-    psp_mandate_ref: str           # PSP's mandate/subscription reference
+    # psp_mandate_ref — the round-trip handle for the mandate lifecycle.
+    # MUST be the merchant-supplied subscription id the PSP keys its action APIs on
+    # (e.g. the id you sent at create, echoed back) — NEVER the PSP's auto-generated
+    # internal id (e.g. cf_subscription_id). See CORE RULE in pattern_create_subscription.md.
+    psp_mandate_ref: str
     status: MandateStatus
     approval: ApprovalHandle       # REDIRECT / UPI_INTENT / UPI_COLLECT / UPI_QR
     raw: dict[str, Any] | None = None
@@ -184,6 +188,10 @@ class MandateDebitOutcome(BaseModel):
 class MandateWebhookEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     event_type: WebhookEventType        # from MANDATE_* range
+    # psp_mandate_ref — MUST equal CreateSubscriptionResponse.psp_mandate_ref for the same
+    # subscription: the merchant subscription id (never the PSP's internal id). All branches
+    # of _parse_mandate_webhook must extract the same source field. See CORE RULE in
+    # pattern_create_subscription.md.
     psp_mandate_ref: str
     psp_event_id: str
     occurred_at: datetime

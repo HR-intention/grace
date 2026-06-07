@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import logging
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 import jinja2
+
+_log = logging.getLogger(__name__)
+
+#: Number of lines occupied by a well-formed Grace marker block.
+_MARKER_LINES = 7
 
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _env = jinja2.Environment(
@@ -86,3 +93,57 @@ def ensure_marker(
     body = path.read_text()
     sep = "" if marker.endswith("\n") else "\n"
     path.write_text(marker + sep + body)
+
+
+def extract_body(text: str) -> str:
+    """Return the content of *text* below the 7-line marker block.
+
+    If the text does not start with a well-formed marker the entire text is
+    returned unchanged (treated as a pure body with no marker).  This mirrors
+    the ``has_marker`` logic without requiring a file on disk.
+    """
+    lines = text.splitlines(keepends=True)
+    if len(lines) >= _MARKER_LINES and lines[0].startswith("# ─"):
+        return "".join(lines[_MARKER_LINES:])
+    return text
+
+
+def dechurn_if_unchanged(path: Path, git_root: Path) -> None:
+    """Restore *path* to its HEAD version when only the marker changed.
+
+    Compares the marker-stripped body of the freshly-stamped file at *path*
+    with the body from the file's last-committed version in HEAD.  If the
+    bodies are byte-identical, the working-tree file is replaced with the HEAD
+    content so the marker timestamp/version reverts too — producing zero git
+    diff.  If the bodies differ (real code changed) or the file is new (not in
+    HEAD), the freshly-stamped file is left as-is.
+
+    Any subprocess / IO error is logged at DEBUG level and silently skipped so
+    the pipeline never crashes due to git interaction failures.
+
+    Args:
+        path:     Absolute path to the file to evaluate.
+        git_root: Absolute path to the git repository root that contains *path*.
+    """
+    try:
+        rel = path.relative_to(git_root)
+        result = subprocess.run(
+            ["git", "-C", str(git_root), "show", f"HEAD:{rel.as_posix()}"],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            # File not in HEAD (new file) — keep the fresh marker.
+            _log.debug("dechurn: %s not in HEAD, keeping fresh marker", rel)
+            return
+
+        head_content = result.stdout.decode("utf-8", errors="replace")
+        new_content = path.read_text()
+
+        if extract_body(new_content) == extract_body(head_content):
+            # Body unchanged — restore HEAD bytes exactly (reverts marker churn).
+            path.write_text(head_content)
+            _log.debug("dechurn: %s body unchanged, restored HEAD marker", rel)
+        else:
+            _log.debug("dechurn: %s body changed, keeping fresh marker", rel)
+    except Exception as exc:  # pragma: no cover – best-effort
+        _log.debug("dechurn: skipping %s due to error: %s", path, exc)

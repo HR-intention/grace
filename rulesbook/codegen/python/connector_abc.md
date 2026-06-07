@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from lens.connector import Connector
 from lens.factory import ConnectorConfig
+from lens.http import build_http_client
 import httpx
 
 
@@ -43,8 +44,9 @@ class _<Psp>Base(Connector):
 
     def __init__(self, config: ConnectorConfig) -> None:
         self._config = config
-        self._client = httpx.AsyncClient(
+        self._client = build_http_client(
             base_url=str(config.base_url_override) if config.base_url_override else self.base_url,
+            connector_name=self.name,
             timeout=30.0,
         )
 
@@ -223,7 +225,7 @@ The composed class has zero leftover abstract methods; it passes `ConnectorFacto
    (`ConnectorFactory.register("<psp>", <Psp>Connector)`).
 2. **`base_url` is a `@property`.** Hard-code the sandbox URL in `_<Psp>Base`; apply
    `config.base_url_override` at `__init__` time.
-3. **One `httpx.AsyncClient`, built in `_<Psp>Base.__init__`.** Never build a second client
+3. **One client (via `lens.http.build_http_client`), built in `_<Psp>Base.__init__`.** Never build a second client
    in a domain mixin.
 4. **`__init__` takes a single `ConnectorConfig`.** Build the client there; do not call
    `.expose()` on optional credentials — defer that to call time.

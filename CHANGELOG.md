@@ -18,6 +18,70 @@ lens 0.6.1) into the PSP customer block.
 - Regenerate Cashfree (`grace generate cashfree`) so the connector forwards `customer_name` to
   `customer_details.customer_name` and the generated subscription fixtures supply it.
 
+- **`_<Psp>Base` builds its client via `lens.http.build_http_client`** (not raw `httpx.AsyncClient`),
+  so generated connectors get outbound request/response logging (lens 0.6.1). Updated: the generation
+  prompt's base example + `_SELF_CHECK_CORE` grep (now asserts `build_http_client` present / raw
+  `httpx.AsyncClient(` absent), `connector_abc.md`, `pitfalls.md`, `file_layout.md`, `README.md`.
+  Generated `__init__` preserves `timeout=30.0` + the `base_url_override` branch.
+- **Generation agent now self-verifies with pytest + mypy before exiting.** A new `MANDATORY
+  EXECUTION VERIFICATION` section in the generation prompt instructs the agent to run
+  `mypy --strict . tests/` and `python -m pytest tests/ -v` on its own output, fix every reported
+  error/failure, and rerun until both exit clean — before it exits. A hard guard explicitly
+  prohibits fixing failures by weakening, skipping, or deleting assertions; broken connector logic
+  must be fixed in the connector. This catches attribute errors and missing required fields in
+  generated tests (e.g. `CreateSubscriptionRequest.CustomerContact` or dropped `customer_ref`)
+  that grep-only structural checks cannot detect.
+
+- **Body-idempotent marker de-churn:** after each generation run, a new de-churn
+  pass compares every emitted `.py` file's marker-stripped body against the last-committed
+  version in git HEAD. If the body is byte-identical the file is silently restored to HEAD's
+  exact content (reverting the timestamp/version churn), so `git diff` only shows files with
+  real code changes. New files and files outside any git repo keep their fresh markers. The
+  pass is best-effort: any git error is logged at DEBUG and skipped — the pipeline never
+  crashes. Covers both connector files under `output_dir` and relocated test files under
+  `<tests_dir>/<psp>/`. Implemented in `pipeline/marker.py` (`extract_body`,
+  `dechurn_if_unchanged`) and wired into `pipeline/orchestrate.py` after `_relocate_tests`.
+
+- **`psp_mandate_ref` guidance tightened** — root cause: the bare `<psp_subscription_id_field>`
+  placeholder carried no semantics, so the LLM could pick Cashfree's internal `cf_subscription_id`
+  instead of the merchant `subscription_id` that action APIs are keyed on, breaking
+  sync/cancel/pause/resume (`subscription_not_found`) and webhook correlation. Fix: (a)
+  `domain_types.md` annotates `psp_mandate_ref` on `CreateSubscriptionResponse` and
+  `MandateWebhookEvent` with a rule directing toward the merchant id and away from internal ids;
+  (b) `pattern_create_subscription.md` annotates the placeholder with the selection heuristic and
+  appends a CORE RULE definition; (c) `pattern_mandate_webhook.md` annotates both `psp_mandate_ref`
+  assignments with the "must equal create's field, NEVER internal id" constraint; (d)
+  `connector_docs/cashfree.md` adds a Cashfree-specific id-mapping section (`subscription_id` vs
+  `cf_subscription_id`); (e) `testing.md` and `pattern_create_subscription.md` require a round-trip
+  consistency test that builds a create response with both ids and asserts the merchant id wins, then
+  feeds a webhook and asserts the parser returns the same ref; (f) `prompt.py`
+  `_SELF_CHECK_SUBSCRIPTIONS` adds a `PSP_MANDATE_REF IDENTITY` self-check block.
+
+- **Headless generation no longer stalls on approval/question prompts.** The runner launched
+  Claude Code with `--permission-mode acceptEdits`, which auto-approves only file *edits* — so
+  every Bash command (the pytest/mypy self-verify loop, grep self-checks, `uv`) raised an
+  approval prompt that a non-interactive `-p` run (stdin closed) can never answer, hanging the
+  generation. Switched to `--permission-mode bypassPermissions` (`pipeline/runner.py`); the
+  agent works inside an isolated `output_dir`. Also hardened the generation prompt's closing
+  directive (`pipeline/prompt.py`): the agent is now told explicitly that it runs
+  NON-INTERACTIVELY — never ask a clarifying question, never wait for approval, pick the
+  documented / most-reasonable default and run to completion.
+
+- **Regen output now survives test relocation + locks the `verify_signature` contract.** A manual
+  regen produced 10 pytest collection errors + 3 mypy errors that the agent's self-verify missed
+  (it verifies the in-package layout *before* grace relocates tests and *before* grace writes the
+  compose surface). Both were LLM divergences from grace's deterministic contracts: (a) tests
+  imported shared fixtures by the absolute in-package path
+  (`from lens.connectors.<psp>.tests.conftest import`), which dies once `_relocate_tests` moves the
+  tree OUT of the package; (b) `core/auth.py`'s `verify_signature` was given a new
+  `(raw_payload, headers, webhook_secret)` signature, breaking the grace-generated caller
+  `verify_signature(config, raw, headers)` in the compose surface. Fixes: `_relocate_tests` now
+  rewrites `from <target_module>.tests[.x] import` → relative `from .x import` on move
+  (deterministic; only the `.tests` path is touched); `testing.md` documents relative conftest
+  imports; `pattern_IncomingWebhook_flow.md` + `webhook_handling.md` mark the `verify_signature`
+  signature LOCKED; and `prompt.py` self-checks reject absolute `…tests…` imports and assert the
+  config-first `verify_signature` signature.
+
 Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
 generated-shape change as a `0.x`-position bump.
 

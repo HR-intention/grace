@@ -170,6 +170,42 @@ def test_relocate_tests_overwrites_existing_destination(
     assert not (dest_psp / "test_stale.py").exists()
 
 
+def test_relocate_tests_rewrites_absolute_in_package_imports_to_relative(
+    stub_ctx: GenerationContext, tmp_path: Path
+) -> None:
+    """Tests move OUT of the package, so absolute in-package imports
+    (`from lens.connectors.<psp>.tests.conftest import ...`) break after the move.
+    Relocation must rewrite them to relative (`from .conftest import ...`) while
+    leaving real connector imports (`...orders.connector`) untouched.
+    """
+    stub_ctx.output_dir.mkdir(parents=True, exist_ok=True)
+    src = stub_ctx.output_dir / "tests"
+    src.mkdir()
+    (src / "test_a.py").write_text(
+        "from lens.connectors.cashfree.tests.conftest import (\n"
+        "    build_connector_with_transport,\n"
+        "    make_mock_transport,\n"
+        ")\n"
+        "from lens.connectors.cashfree.tests import helpers\n"
+        "from lens.connectors.cashfree.orders.connector import CashfreeOrders\n"
+        "\n"
+        "def test_a() -> None:\n"
+        "    assert CashfreeOrders is not None and helpers is not None\n"
+    )
+
+    dest_root = tmp_path / "tests" / "connectors"
+    ctx = replace(stub_ctx, tests_dir=dest_root)
+    _relocate_tests(ctx)
+
+    moved = (dest_root / "cashfree" / "test_a.py").read_text()
+    # absolute in-package test imports rewritten to relative:
+    assert "from .conftest import (" in moved
+    assert "from . import helpers" in moved
+    assert "lens.connectors.cashfree.tests" not in moved
+    # real connector import preserved verbatim (NOT rewritten):
+    assert "from lens.connectors.cashfree.orders.connector import CashfreeOrders" in moved
+
+
 def test_run_pipeline_relocates_tests_after_marker_post_processing(
     stub_ctx: GenerationContext, tmp_path: Path
 ) -> None:

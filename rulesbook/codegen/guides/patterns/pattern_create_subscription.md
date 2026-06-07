@@ -117,7 +117,14 @@ async def create_subscription(
     # 4. Parse the wire response and build the domain response.
     psp_resp = <Psp>CreateSubscriptionResponse.model_validate(resp.json())
     return CreateSubscriptionResponse(
-        psp_mandate_ref=psp_resp.<psp_subscription_id_field>,
+        # CORE RULE — psp_mandate_ref selection:
+        # Pick the id that appears in the PSP's action-API URL path (/subscriptions/{id}).
+        # This is the MERCHANT-SUPPLIED subscription id you sent at create (often echoed
+        # back in the response), NEVER the PSP's auto-generated/internal id (e.g. cf_* /
+        # psp_* ids). The value chosen here MUST equal the webhook parser's psp_mandate_ref
+        # (same source field in both places). Using the internal id → action calls fail with
+        # *_not_found and webhooks cannot correlate. See full definition at end of this file.
+        psp_mandate_ref=psp_resp.<psp_subscription_id_field>,   # merchant id, NOT internal id
         status=map_subscription_status(psp_resp.subscription_status),   # status_map.py
         approval=_build_approval_handle(psp_resp),
         raw=psp_resp.model_dump(),
@@ -166,6 +173,28 @@ def _build_approval_handle(psp_resp: <Psp>CreateSubscriptionResponse) -> Approva
 - **PSP 429** — transport returns 429; assert `ConnectorError(reason=RATE_LIMITED)`.
 - **PSP 5xx** — transport returns 503; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
 - **Network error** — `MockTransport` raises `httpx.ConnectError`; assert `ConnectorError(reason=PSP_UNAVAILABLE)`.
+- **psp_mandate_ref round-trip consistency** — build a create response that carries BOTH the
+  merchant subscription id AND the PSP's internal id (e.g. `subscription_id="merchant-sub-1"`
+  and `cf_subscription_id="cf_internal_999"`); assert `create_subscription(...).psp_mandate_ref`
+  equals the MERCHANT id (not the internal id). Then feed a webhook for the same subscription
+  through the parser and assert its `psp_mandate_ref` equals that SAME merchant id:
+  ```python
+  async def test_psp_mandate_ref_is_merchant_id_not_internal(connector, webhook_parser) -> None:
+      # PSP response carries both merchant id and internal id.
+      response_body = {
+          "subscription_id": "merchant-sub-1",        # merchant-supplied, action-API keyed
+          "cf_subscription_id": "cf_internal_999",    # PSP auto-generated — MUST NOT use this
+          "subscription_status": "INITIALIZED",
+          # ... other required fields ...
+      }
+      result = await connector.create_subscription(_request())
+      assert result.psp_mandate_ref == "merchant-sub-1"        # merchant id wins
+      assert result.psp_mandate_ref != "cf_internal_999"       # internal id rejected
+
+      # Webhook for the same subscription must carry the same ref.
+      webhook_event = webhook_parser(_build_mandate_webhook_bytes("merchant-sub-1"))
+      assert webhook_event.psp_mandate_ref == result.psp_mandate_ref
+  ```
 
 ## Required tests (rails cases)
 
@@ -199,3 +228,24 @@ def _build_approval_handle(psp_resp: <Psp>CreateSubscriptionResponse) -> Approva
   in periodic mode, gate the field on `first_charge_at is not None`.
 - **`expires_at` vs `max_cycles`**: both constrain the mandate lifetime. If the PSP supports
   only one, prefer `expires_at` and note the limitation in a comment.
+- **`psp_mandate_ref` must be the merchant id, never the internal id**: see CORE RULE below.
+
+---
+
+## CORE RULE — psp_mandate_ref field selection
+
+> `psp_mandate_ref` is the round-trip handle for a mandate: the consumer stores it from
+> `create_subscription` and passes it back to every later action API (`sync_subscription`,
+> `cancel`/`pause`/`resume_subscription`, `change_plan`); inbound webhooks carry it for
+> correlation. It MUST be the **identical field** in (a) the create-subscription response,
+> (b) the webhook parser, and (c) the id placed in the action-API URL path — and it MUST be
+> the id the PSP keys its `/subscriptions/{id}` action APIs on: the **merchant-supplied
+> subscription id you sent at create** (usually echoed back in responses/webhooks), **never**
+> the PSP's auto-generated/internal id (e.g. a `cf_*`/`psp_*` id). Returning the internal id
+> silently breaks the whole lifecycle: action calls fail with `*_not_found` and webhooks
+> can't correlate.
+
+**How to identify the correct field:** look at the PSP's action-API URL template in
+`connector_docs/<psp>.md`. The `{id}` placeholder in `/subscriptions/{id}` is the field
+you must use. If the PSP echoes back both a merchant id and an internal id in the create
+response, choose the one that matches the action-API path key — never the internal one.
