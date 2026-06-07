@@ -95,6 +95,40 @@ tests/
 - **All `CreateSubscriptionRequest` fields forwarded**: `customer_name`, `customer_contact.email`,
   `customer_contact.phone`, `first_charge_at`, `description`, `return_url`, `upi_vpa`,
   `idempotency_key` — assert the mock received them in the wire request.
+- **psp_mandate_ref round-trip consistency**: build a PSP create response that carries BOTH the
+  merchant subscription id AND the PSP's internal id. Assert `create_subscription(...).psp_mandate_ref`
+  equals the merchant id (not the internal id). Then feed a webhook for the same subscription through
+  `_parse_mandate_webhook` and assert its `psp_mandate_ref` equals that same value. Example:
+
+  ```python
+  async def test_psp_mandate_ref_is_merchant_id_not_internal_id() -> None:
+      """create_subscription must use the merchant subscription id, never the PSP internal id.
+
+      The merchant id is what the PSP's action APIs (/subscriptions/{id}) are keyed on.
+      Using the PSP's auto-generated internal id (e.g. cf_subscription_id) causes
+      subscription_not_found on sync/cancel/pause/resume and breaks webhook correlation.
+      """
+      merchant_sub_id = "merchant-sub-abc"
+      internal_sub_id = "cf_internal_999"   # PSP auto-generated — MUST NOT be returned
+
+      # Response body carries both ids.
+      response_body = {
+          "subscription_id": merchant_sub_id,
+          "cf_subscription_id": internal_sub_id,
+          "subscription_status": "INITIALIZED",
+          # ... other PSP-required fields ...
+      }
+      connector = _build_subscriptions_connector(_handler(response_body))
+      result = await connector.create_subscription(_create_subscription_request())
+
+      assert result.psp_mandate_ref == merchant_sub_id       # merchant id wins
+      assert result.psp_mandate_ref != internal_sub_id       # internal id must not leak
+
+      # Webhook for the same subscription must carry the same ref.
+      webhook_bytes = _build_mandate_webhook_bytes(subscription_id=merchant_sub_id)
+      webhook_event = _parse_mandate_webhook(webhook_bytes)
+      assert webhook_event.psp_mandate_ref == result.psp_mandate_ref
+  ```
 
 ### `test_sync_subscription.py`
 - **ACTIVE mandate**: assert `SyncSubscriptionResponse.status == MandateStatus.ACTIVE`.

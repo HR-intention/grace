@@ -327,6 +327,12 @@ _SELF_CHECK_SUBSCRIPTIONS = """\
     Grep(pattern="map_subscription_status|map_debit_status", path=<cwd>/tests, glob="*.py")
         → present  (subscription status_map fallback branches must be tested)
 
+  PSP_MANDATE_REF IDENTITY:
+    `psp_mandate_ref` is the merchant subscription id (the `/subscriptions/{id}` action-path
+    id), the SAME field in create_subscription's response and _parse_mandate_webhook (all
+    branches) — never `cf_*`/internal. Verify: the create response and every webhook branch
+    read the same source field (the merchant id), not the PSP's auto-generated internal id.
+
   WEBHOOK ROUTER TEST:
     Grep(pattern="test_webhook_router", path=<cwd>/tests, glob="*.py")
         → present  (cross-domain: exercises both PAYMENT and MANDATE families + tampered sig)"""

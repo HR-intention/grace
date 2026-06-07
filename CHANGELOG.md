@@ -42,6 +42,21 @@ lens 0.6.1) into the PSP customer block.
   `<tests_dir>/<psp>/`. Implemented in `pipeline/marker.py` (`extract_body`,
   `dechurn_if_unchanged`) and wired into `pipeline/orchestrate.py` after `_relocate_tests`.
 
+- **`psp_mandate_ref` guidance tightened** — root cause: the bare `<psp_subscription_id_field>`
+  placeholder carried no semantics, so the LLM could pick Cashfree's internal `cf_subscription_id`
+  instead of the merchant `subscription_id` that action APIs are keyed on, breaking
+  sync/cancel/pause/resume (`subscription_not_found`) and webhook correlation. Fix: (a)
+  `domain_types.md` annotates `psp_mandate_ref` on `CreateSubscriptionResponse` and
+  `MandateWebhookEvent` with a rule directing toward the merchant id and away from internal ids;
+  (b) `pattern_create_subscription.md` annotates the placeholder with the selection heuristic and
+  appends a CORE RULE definition; (c) `pattern_mandate_webhook.md` annotates both `psp_mandate_ref`
+  assignments with the "must equal create's field, NEVER internal id" constraint; (d)
+  `connector_docs/cashfree.md` adds a Cashfree-specific id-mapping section (`subscription_id` vs
+  `cf_subscription_id`); (e) `testing.md` and `pattern_create_subscription.md` require a round-trip
+  consistency test that builds a create response with both ids and asserts the merchant id wins, then
+  feeds a webhook and asserts the parser returns the same ref; (f) `prompt.py`
+  `_SELF_CHECK_SUBSCRIPTIONS` adds a `PSP_MANDATE_REF IDENTITY` self-check block.
+
 Versioned **0.9.1** (patch) by request — note the §8 convention above would treat a
 generated-shape change as a `0.x`-position bump.
 
