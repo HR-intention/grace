@@ -2,6 +2,14 @@
 
 Every deviation listed here costs rubric points. The fixes are concrete and unambiguous.
 
+> **⭐ Before anything else, study the gold reference:**
+> [`../references/cashfree_gold_reference.md`](../references/cashfree_gold_reference.md) — the
+> sandbox-validated Cashfree connector with the seven load-bearing patterns (error wrapping,
+> `Decimal`→string amounts, merchant-id selection, permissive response wire-models, webhook
+> event/status mapping, base/mixin stitching, rails union). A real regeneration that followed only
+> the abstract rules still broke all seven — the concrete reference is the antidote. Match its
+> shapes exactly.
+
 ---
 
 ## 1. Class naming

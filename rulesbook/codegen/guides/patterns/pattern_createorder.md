@@ -13,7 +13,8 @@ See `../python/domain_types.md` for the locked shape. Highlights:
 - `request.return_url: HttpUrl` — where the PSP redirects the payer after checkout.
 - `request.allowed_methods: list[PaymentMethod] | None` — translates to the PSP's allow-list payload.
 - `request.idempotency_key: str | None` — if set and `supports_idempotency_key`, pass through as a header.
-- Response carries `psp_order_id`, `payment_link`, `status` (typically `OrderStatus.CREATED`), and optional `expires_at`.
+- `request.notify_url: HttpUrl | None` — optional server-to-server webhook URL; pass into the PSP's order-meta block when present, omit when `None`.
+- Response carries `psp_order_id`, `payment_link`, `status` (typically `OrderStatus.CREATED`), optional `expires_at`, and `psp_response: dict | None` — a small dict of PSP raw fields Orbit needs downstream (e.g. the checkout SDK `sessionId`).
 
 ## Method signature (in `connector.py`)
 
@@ -37,6 +38,7 @@ async def create_order(self, request: CreateOrderRequest) -> CreateOrderResponse
         order_meta=<Psp>OrderMeta(
             return_url=str(request.return_url),
             payment_methods=_format_methods(request.allowed_methods),
+            notify_url=f"{request.notify_url}" if request.notify_url else None,  # optional S2S webhook
         ),
         # ... other PSP-specific fields per its API docs
     )
@@ -105,6 +107,7 @@ return CreateOrderResponse(
     payment_link=HttpUrl(payment_link_str),   # ← coerce str→HttpUrl; required, non-optional
     status=OrderStatus.CREATED,
     expires_at=psp_resp.order_expiry_time,
+    psp_response={"sessionId": psp_resp.payment_session_id},  # small dict of PSP raw bits Orbit needs (e.g. SDK session id)
 )
 ```
 
@@ -134,3 +137,5 @@ or null; assert `ConnectorError(reason=INTERNAL)`.
 - The wire-level amount unit varies. Cashfree wants rupees-as-string (`"500.00"` for 50000 paise). Use `Decimal` inside the connector — never let the conversion bleed into the domain types.
 - The PSP's `customer_details` block is built from `request.customer_id` if present; otherwise omit or use a sane default per the PSP's docs.
 - If the PSP returns its session-id under a different key (`cf_order_id`, `order_id`, `id`, ...), the wire model decodes that; the domain response uses our `psp_order_id` name regardless.
+- **`notify_url`**: add an optional `notify_url: str | None = None` field to `<Psp>OrderMeta` and pass `notify_url=f"{request.notify_url}" if request.notify_url else None`. Omit (`None`) when the caller didn't supply one.
+- **`psp_response`**: populate `CreateOrderResponse.psp_response` with the minimal set of PSP raw fields Orbit needs downstream that aren't already first-class domain fields (e.g. `{"sessionId": <checkout session id>}` for SDK-driven checkout). Keep it small — the full raw body is not the contract.

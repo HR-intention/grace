@@ -237,6 +237,9 @@ _SELF_CHECK_CORE = """\
                          resolve config.webhook_secret.expose() INSIDE the function)
     Grep(pattern="WEBHOOK_SIGNATURE_FAILED", path=<cwd>, glob="*.py", output_mode="count")
         → at least one match (in webhooks.py or core/auth.py)
+    Grep(pattern="webhook_secret is None", path=<cwd>/core, glob="auth.py")
+        → present  (verify_signature RAISES ConnectorError(WEBHOOK_SIGNATURE_FAILED) when
+                    config.webhook_secret is None — it must NOT return False or crash on .expose())
 
   TESTS — SHARED FIXTURE IMPORTS:
     Grep(pattern="from lens\\.connectors\\..*\\.tests", path=<cwd>/tests, glob="*.py")
@@ -264,6 +267,13 @@ _SELF_CHECK_ORDERS = """\
         → at least one match  (not .value, not .amount)
     Grep(pattern="float\\(", path=<cwd>, glob="*.py")
         → ZERO matches
+    Grep(pattern="/ 100.0", path=<cwd>, glob="*.py")
+        → ZERO matches  (PSP amounts are str(Decimal(minor_units) / 100), e.g. "50" — NEVER float
+                         `/ 100.0`; floats lose precision and Cashfree wants a string)
+    Grep(pattern="str(Decimal", path=<cwd>/orders, glob="connector.py")
+        → at least one match  (order_amount / refund_amount serialized as strings via Decimal)
+    Grep(pattern="x-idempotency-key", path=<cwd>/orders, glob="connector.py")
+        → at least one match  (create_order AND refund forward request.idempotency_key)
     Grep(pattern="Money", path=<cwd>, glob="*.py")
         → ZERO matches
     Grep(pattern="RefundRequest\\(.*\\bamount=", path=<cwd>, glob="*.py")
