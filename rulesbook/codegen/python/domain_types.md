@@ -58,6 +58,12 @@ PaymentAttempt:        psp_payment_id, status, method_used, amount (Amount|None)
 `paid_amount` and `refunded_amount` are **`int` minor-units** (e.g. paise), never `Amount`.
 `PaymentAttempt.amount` is `Amount | None` — the only `Amount` on the response side.
 
+**`psp` is facade-owned — never set it.** Every response model inherits `ResponseCommon.psp:
+str | None` (the registered connector name). The **facade** stamps it onto the response before
+returning to the caller; connector code MUST NOT set `psp` (leave it defaulted to `None`). It is
+deliberately omitted from the response-field lists above for exactly this reason — do not invent
+it into a response constructor call.
+
 ### `PaymentWebhookEvent` — exact fields (no more, no less)
 
 ```python

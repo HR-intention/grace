@@ -18,8 +18,9 @@ directly; instead you subclass one of the concrete capability interfaces:
 A per-PSP **private** base class lives in `core/base.py`. It owns:
 
 - `name` property (returns the PSP's registry key, e.g. `"<psp>"`).
-- `base_url` property (sandbox URL hard-coded in v1; overridable at runtime via
-  `ConnectorConfig.base_url_override`).
+- `base_url` property — resolves the API host from `ConnectorConfig.environment` via a
+  module-level `_BASE_URLS` map (sandbox/production hosts from `connector_docs/<psp>.md`);
+  `ConnectorConfig.base_url_override`, when set, still wins.
 - `close()` — closes the ONE shared `httpx.AsyncClient`.
 - `__init__(config: ConnectorConfig)` — stores `_config`, builds the single `_client`.
 
@@ -29,8 +30,14 @@ from __future__ import annotations
 
 from lens.connector import Connector
 from lens.factory import ConnectorConfig
+from lens.globals import Environment
 from lens.http import build_http_client
-import httpx
+
+# Per-environment API hosts, taken from connector_docs/<psp>.md `base_url`.
+_BASE_URLS = {
+    Environment.SANDBOX: "<PSP_SANDBOX_URL>",
+    Environment.PRODUCTION: "<PSP_PRODUCTION_URL>",
+}
 
 
 class _<Psp>Base(Connector):
@@ -40,7 +47,7 @@ class _<Psp>Base(Connector):
 
     @property
     def base_url(self) -> str:
-        return "<PSP_SANDBOX_URL>"   # hard-coded; override via config.base_url_override
+        return _BASE_URLS[self._config.environment]   # resolved from ConnectorConfig.environment
 
     def __init__(self, config: ConnectorConfig) -> None:
         self._config = config
@@ -223,8 +230,11 @@ The composed class has zero leftover abstract methods; it passes `ConnectorFacto
 
 1. **`name` is a `@property` returning a string literal** matching the registry key
    (`ConnectorFactory.register("<psp>", <Psp>Connector)`).
-2. **`base_url` is a `@property`.** Hard-code the sandbox URL in `_<Psp>Base`; apply
-   `config.base_url_override` at `__init__` time.
+2. **`base_url` is a `@property`** resolving the host from `self._config.environment` via a
+   module-level `_BASE_URLS` map (`{Environment.SANDBOX: ..., Environment.PRODUCTION: ...}`,
+   filled from `connector_docs/<psp>.md`). `config.base_url_override`, when set, still wins for
+   the API base (applied at `__init__`). Customer-facing payment/checkout links MUST derive from
+   `self.base_url` so they follow the environment automatically.
 3. **One client (via `lens.http.build_http_client`), built in `_<Psp>Base.__init__`.** Never build a second client
    in a domain mixin.
 4. **`__init__` takes a single `ConnectorConfig`.** Build the client there; do not call
